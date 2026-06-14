@@ -19,6 +19,7 @@ use Azure::Blob
 use Azure::Queue
 use Azure::Cosmos
 use Azure::Secrets
+use Azure::Keys
 
 # ── Azure.stk: version + identity ───────────────────────────
 assert_ok exists &Azure::version, "Azure::version exists"
@@ -111,5 +112,14 @@ assert_ok exists &Azure::Blob::set_metadata, "Azure::Blob::set_metadata exists"
 assert_ok exists &Azure::Cosmos::delete_database, "Azure::Cosmos::delete_database exists"
 assert_ok exists &Azure::Cosmos::delete_container, "Azure::Cosmos::delete_container exists"
 assert_ok exists &Azure::Cosmos::replace, "Azure::Cosmos::replace exists"
+
+assert_ok exists &Azure::secrets_list_versions, "Azure::secrets_list_versions exists"
+assert_ok exists &Azure::secrets_backup, "Azure::secrets_backup exists"
+assert_ok exists &Azure::keys_encrypt, "Azure::keys_encrypt exists"
+assert_ok exists &Azure::keys_decrypt, "Azure::keys_decrypt exists"
+assert_ok exists &Azure::Secrets::versions, "Azure::Secrets::versions exists"
+assert_ok exists &Azure::Secrets::backup, "Azure::Secrets::backup exists"
+assert_ok exists &Azure::Keys::encrypt, "Azure::Keys::encrypt exists"
+assert_ok exists &Azure::Keys::decrypt, "Azure::Keys::decrypt exists"
 
 test_run

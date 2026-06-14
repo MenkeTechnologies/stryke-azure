@@ -45,6 +45,10 @@ exports = [
     "azure__secrets_set",
     "azure__secrets_list",
     "azure__secrets_delete",
+    "azure__secrets_list_versions",
+    "azure__secrets_backup",
+    "azure__keys_encrypt",
+    "azure__keys_decrypt",
 ]
 
 [scripts]

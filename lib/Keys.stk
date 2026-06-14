@@ -1,0 +1,18 @@
+## lib/Keys.stk — `use Azure::Keys` (Key Vault key crypto)
+##
+## Wraps `Azure::keys_*` from the cdylib (RSA encrypt/decrypt).
+
+package Azure::Keys
+
+use Azure
+
+## Encrypt $plaintext with $key. opts: algorithm (default RSA-OAEP-256).
+## Returns { ciphertext, kid, algorithm }.
+fn Azure::Keys::encrypt ($key, $plaintext, %opts) {
+    Azure::keys_encrypt($key, $plaintext, %opts)
+}
+
+## Decrypt base64 $ciphertext with $key $version. opts: algorithm.
+fn Azure::Keys::decrypt ($key, $version, $ciphertext, %opts) {
+    Azure::keys_decrypt($key, $version, $ciphertext, %opts)
+}

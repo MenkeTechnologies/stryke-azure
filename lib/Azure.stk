@@ -287,3 +287,36 @@ fn Azure::cosmos_replace_item ($database, $container, $pk, $id, $item, %opts) {
           partition_key => $pk, id => $id, item => $item }, \%opts)
     Azure::_decode("cosmos_replace_item", azure__cosmos_replace_item(to_json($r)))->{item}
 }
+
+# ── secret versions + backup ─────────────────────────────────────────
+
+## List a secret's versions ({ id }). Newest first.
+fn Azure::secrets_list_versions ($name, %opts) {
+    val $r = Azure::_req({ name => $name }, \%opts)
+    @{ Azure::_decode("secrets_list_versions", azure__secrets_list_versions(to_json($r)))->{versions} }
+}
+
+## Back up a secret; returns the base64 backup blob (restore in the same vault).
+fn Azure::secrets_backup ($name, %opts) {
+    val $r = Azure::_req({ name => $name }, \%opts)
+    Azure::_decode("secrets_backup", azure__secrets_backup(to_json($r)))->{backup}
+}
+
+# ── Key Vault Keys (crypto) ──────────────────────────────────────────
+
+## Encrypt $plaintext with key $key. opts: algorithm (RSA-OAEP-256 default).
+## Returns { ciphertext (base64), kid, algorithm }.
+fn Azure::keys_encrypt ($key, $plaintext, %opts) {
+    val $r = Azure::_req(
+        { key => $key, plaintext => $plaintext, algorithm => $opts{algorithm} }, \%opts)
+    Azure::_decode("keys_encrypt", azure__keys_encrypt(to_json($r)))
+}
+
+## Decrypt base64 $ciphertext with key $key version $version (the trailing
+## segment of the encrypt result's kid). opts: algorithm. Returns the plaintext.
+fn Azure::keys_decrypt ($key, $version, $ciphertext, %opts) {
+    val $r = Azure::_req(
+        { key => $key, version => $version, ciphertext => $ciphertext,
+          algorithm => $opts{algorithm} }, \%opts)
+    Azure::_decode("keys_decrypt", azure__keys_decrypt(to_json($r)))->{plaintext}
+}

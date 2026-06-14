@@ -616,6 +616,106 @@ async fn op_secrets_delete(opts: Value) -> Result<Value> {
     Ok(json!({ "name": name, "deleted": true }))
 }
 
+async fn op_secrets_list_versions(opts: Value) -> Result<Value> {
+    let client = secret_client(&opts)?;
+    let name = req_str(&opts, "name")?.to_string();
+    let mut pager = client.list_secret_properties_versions(&name, None)?;
+    let mut out = Vec::new();
+    while let Some(p) = pager.try_next().await? {
+        out.push(json!({ "id": p.id }));
+    }
+    Ok(json!({ "name": name, "versions": out }))
+}
+
+async fn op_secrets_backup(opts: Value) -> Result<Value> {
+    use base64::Engine as _;
+    let client = secret_client(&opts)?;
+    let name = req_str(&opts, "name")?.to_string();
+    let r = client.backup_secret(&name, None).await?.into_model()?;
+    // The backup blob is opaque; hand it back base64-encoded for restore later.
+    let backup = r
+        .value
+        .map(|b| base64::engine::general_purpose::STANDARD.encode(b));
+    Ok(json!({ "name": name, "backup": backup }))
+}
+
+// ── Key Vault Keys (KMS analog) ──────────────────────────────────────────────
+
+fn key_client(opts: &Value) -> Result<azure_security_keyvault_keys::KeyClient> {
+    use azure_security_keyvault_keys::KeyClient;
+    Ok(KeyClient::new(&vault_url(opts)?, cred()?, None)?)
+}
+
+/// Map a caller algorithm name to the SDK enum (RSA asymmetric algorithms —
+/// the common Key Vault encrypt/decrypt case). Defaults to RSA-OAEP-256.
+fn enc_algo(s: &str) -> Result<azure_security_keyvault_keys::models::EncryptionAlgorithm> {
+    use azure_security_keyvault_keys::models::EncryptionAlgorithm as E;
+    Ok(match s.to_ascii_uppercase().replace('_', "-").as_str() {
+        "RSA-OAEP" => E::RsaOaep,
+        "RSA-OAEP-256" => E::RsaOaep256,
+        "RSA1-5" | "RSA15" => E::Rsa1_5,
+        other => {
+            return Err(anyhow!(
+                "unsupported algorithm `{other}` (use RSA-OAEP, RSA-OAEP-256, or RSA1_5)"
+            ))
+        }
+    })
+}
+
+async fn op_keys_encrypt(opts: Value) -> Result<Value> {
+    use azure_security_keyvault_keys::models::KeyOperationParameters;
+    use base64::Engine as _;
+    let client = key_client(&opts)?;
+    let key = req_str(&opts, "key")?.to_string();
+    let algorithm = opt_str(&opts, "algorithm").unwrap_or("RSA-OAEP-256");
+    let plaintext = req_str(&opts, "plaintext")?.as_bytes().to_vec();
+    let params = KeyOperationParameters {
+        algorithm: Some(enc_algo(algorithm)?),
+        value: Some(plaintext),
+        ..Default::default()
+    };
+    let r = client
+        .encrypt(&key, params.try_into()?, None)
+        .await?
+        .into_model()?;
+    let ciphertext = r
+        .result
+        .map(|b| base64::engine::general_purpose::STANDARD.encode(b));
+    // `kid` carries the key version (trailing path segment) needed for decrypt.
+    Ok(json!({ "key": key, "algorithm": algorithm, "ciphertext": ciphertext, "kid": r.kid }))
+}
+
+async fn op_keys_decrypt(opts: Value) -> Result<Value> {
+    use azure_security_keyvault_keys::models::KeyOperationParameters;
+    use base64::Engine as _;
+    let client = key_client(&opts)?;
+    let key = req_str(&opts, "key")?.to_string();
+    // decrypt (unlike encrypt) targets a specific key version — required by the
+    // REST path. The version is the trailing segment of the key id `kid`.
+    let version = req_str(&opts, "version")?.to_string();
+    let algorithm = opt_str(&opts, "algorithm").unwrap_or("RSA-OAEP-256");
+    let ciphertext = base64::engine::general_purpose::STANDARD
+        .decode(req_str(&opts, "ciphertext")?)
+        .map_err(|e| anyhow!("ciphertext base64: {e}"))?;
+    let params = KeyOperationParameters {
+        algorithm: Some(enc_algo(algorithm)?),
+        value: Some(ciphertext),
+        ..Default::default()
+    };
+    let r = client
+        .decrypt(&key, &version, params.try_into()?, None)
+        .await?
+        .into_model()?;
+    let plaintext = r.result.map(|b| match String::from_utf8(b.clone()) {
+        Ok(s) => Value::String(s),
+        Err(_) => Value::String(format!(
+            "base64:{}",
+            base64::engine::general_purpose::STANDARD.encode(&b)
+        )),
+    });
+    Ok(json!({ "key": key, "plaintext": plaintext }))
+}
+
 // ── FFI plumbing ─────────────────────────────────────────────────────────────
 
 fn ffi_call_async<F, Fut>(args: *const c_char, handler: F) -> *const c_char
@@ -713,6 +813,11 @@ export!(azure__secrets_get, op_secrets_get);
 export!(azure__secrets_set, op_secrets_set);
 export!(azure__secrets_list, op_secrets_list);
 export!(azure__secrets_delete, op_secrets_delete);
+export!(azure__secrets_list_versions, op_secrets_list_versions);
+export!(azure__secrets_backup, op_secrets_backup);
+
+export!(azure__keys_encrypt, op_keys_encrypt);
+export!(azure__keys_decrypt, op_keys_decrypt);
 
 // ── tests ────────────────────────────────────────────────────────────────────
 

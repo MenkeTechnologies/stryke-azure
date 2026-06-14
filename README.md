@@ -48,6 +48,7 @@ use Azure::Blob
 use Azure::Cosmos
 use Azure::Queue
 use Azure::Secrets
+use Azure::Keys
 
 # Connectivity probe (Entra token; the token value is never returned).
 val $tok = Azure::identity_token()
@@ -75,6 +76,12 @@ val $u = Azure::Cosmos::get("appdb", "users", "acme", "u1")
 
 # Key Vault Secrets.
 val $pw = Azure::Secrets::get("db-password", vault => "my-kv")
+val @vers = Azure::Secrets::versions("db-password", vault => "my-kv")
+
+# Key Vault Keys — RSA encrypt/decrypt (KMS analog).
+val $enc = Azure::Keys::encrypt("wrap-key", "secret data", vault => "my-kv")
+val $kid = $enc->{kid}                                  # has the key version
+val $clear = Azure::Keys::decrypt("wrap-key", $version, $enc->{ciphertext}, vault => "my-kv")
 ```
 
 ### Connection options
