@@ -19,8 +19,8 @@ azure_core = "1"
 azure_identity = "1"
 azure_storage_blob = "1"
 azure_storage_queue = "1"
-# Cosmos has not reached GA — pin the exact preview to keep builds reproducible.
-azure_data_cosmos = "=0.35.0"
+# Cosmos has not reached GA; Cargo.lock pins the exact preview build for reproducibility.
+azure_data_cosmos = "0.35.0"
 azure_security_keyvault_secrets = "1"
 azure_security_keyvault_keys = "1"
 url = "2"
