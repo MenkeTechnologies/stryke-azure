@@ -12,6 +12,9 @@ It holds one shared `tokio` runtime and one Entra credential
 (`DeveloperToolsCredential` — the Azure CLI / `azd` chain), reused across every
 service client. There is no per-call fork, no per-call credential rebuild.
 
+Docs: <https://menketechnologies.github.io/stryke-azure/> ·
+[Engineering report](https://menketechnologies.github.io/stryke-azure/report.html)
+
 ## Service map
 
 `stryke-azure` mirrors the surface of [`stryke-aws`](https://github.com/MenkeTechnologies/stryke-aws),

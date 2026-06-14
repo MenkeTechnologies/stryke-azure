@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="stryke-azure — Azure client for stryke. Blob Storage, Storage Queues, Cosmos DB, Key Vault Secrets, Entra identity. A cdylib dlopened in-process by the stryke runtime over the official Azure SDK for Rust (GA 1.0.0).">
+  <title>stryke-azure — Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&amp;family=Share+Tech+Mono&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="hud-static.css">
+  <link rel="stylesheet" href="tutorial.css">
+  <style>
+    .tutorial-main { max-width: 68rem; }
+    .docs-build-line {
+      margin: 0.35rem 0 0;
+      font-family: 'Share Tech Mono', ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 0.03em;
+      max-width: 46rem;
+      opacity: 0.75;
+    }
+    .example-tbl { width: 100%; border-collapse: collapse; margin: 0.6rem 0; font-size: 12.5px; }
+    .example-tbl th {
+      background: var(--bg-secondary);
+      color: var(--cyan);
+      font-family: 'Orbitron', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      text-align: left;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+    }
+    .example-tbl td {
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      vertical-align: top;
+      color: var(--text-dim);
+    }
+    .example-tbl td:first-child { width: 38%; color: var(--cyan); font-family: 'Share Tech Mono', monospace; }
+    .example-tbl td code { color: var(--accent-light); background: var(--bg); padding: 1px 5px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="app tutorial-app" id="docsApp">
+    <div class="crt-scanline" id="crtH" aria-hidden="true"></div>
+    <div class="crt-scanline-v" id="crtV" aria-hidden="true"></div>
+
+    <header class="tutorial-header">
+      <div class="tutorial-header-inner">
+        <div>
+          <h1 class="tutorial-brand">// STRYKE-AZURE &mdash; AZURE CLIENT FOR STRYKE // BLOB + QUEUE + COSMOS + KEY VAULT + IDENTITY</h1>
+          <nav class="tutorial-crumbs" aria-label="Breadcrumb">
+            <span class="current">Docs</span>
+            <span class="sep">/</span>
+            <a href="report.html">Engineering report</a>
+            <span class="sep">/</span>
+            <a href="https://github.com/MenkeTechnologies/stryke-azure" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <span class="sep">/</span>
+            <a href="https://github.com/MenkeTechnologies/strykelang" target="_blank" rel="noopener noreferrer">strykelang</a>
+            <span class="sep">/</span>
+            <a href="https://github.com/MenkeTechnologies/MenkeTechnologiesMeta" target="_blank" rel="noopener noreferrer">Meta</a>
+          </nav>
+          <p class="docs-build-line">stryke package &middot; namespace <code>Azure</code> &middot; cdylib <code>libstryke_azure</code> &middot; opt-in (kept out of stryke core)</p>
+        </div>
+        <div class="tutorial-toolbar">
+          <button type="button" class="btn btn-secondary" id="btnTheme" title="Toggle light/dark">Theme</button>
+          <button type="button" class="btn btn-secondary active" id="btnCrt" title="CRT scanline overlay">CRT</button>
+          <button type="button" class="btn btn-secondary active" id="btnNeon" title="Neon border pulse">Neon</button>
+          <a class="btn btn-secondary" href="report.html">Report</a>
+          <a class="btn btn-secondary" href="https://github.com/MenkeTechnologies/stryke-azure" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a class="btn btn-secondary" href="https://github.com/MenkeTechnologies/stryke-azure/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="tutorial-main">
+      <h2 class="tutorial-title"><span class="step-hash">&gt;_</span>STRYKE-AZURE</h2>
+      <p class="tutorial-subtitle"><strong>The cloud, one stryke pipe away.</strong> Azure client for stryke &mdash; Blob Storage, Storage Queues, Cosmos DB, Key Vault Secrets, and Entra identity. An opt-in package, kept out of the stryke core binary so the daily-driver install stays slim. The Azure SDK pulls in tokio, hyper, rustls, and reqwest &mdash; far too heavy to bake into stryke core.</p>
+
+      <section class="tutorial-section">
+        <h2>Install</h2>
+<pre># build the cdylib, install as a stryke package
+cd ~/projects/stryke-azure
+cargo build --release
+s pkg install -g .
+
+# one-liner
+make install
+
+# sign in first (DeveloperToolsCredential uses the az / azd chain)
+az login</pre>
+        <p>The release build produces <code>target/release/libstryke_azure.{dylib,so}</code>; <code>s pkg install -g .</code> places it in <code>~/.stryke/store/azure@&lt;ver&gt;/</code>. The cdylib is dlopened in-process on first <code>use Azure</code>.</p>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Service map</h2>
+        <p>stryke-azure mirrors the surface of <a href="https://github.com/MenkeTechnologies/stryke-aws" target="_blank" rel="noopener noreferrer">stryke-aws</a>, mapped onto Azure's GA Rust SDK.</p>
+        <table class="example-tbl">
+          <thead><tr><th>AWS service</th><th>Azure service / crate</th></tr></thead>
+          <tbody>
+            <tr><td>S3</td><td>Blob Storage &mdash; <code>azure_storage_blob</code></td></tr>
+            <tr><td>SQS</td><td>Storage Queues &mdash; <code>azure_storage_queue</code></td></tr>
+            <tr><td>DynamoDB</td><td>Cosmos DB (NoSQL) &mdash; <code>azure_data_cosmos</code> (preview)</td></tr>
+            <tr><td>Secrets Manager / SSM Parameter Store</td><td>Key Vault Secrets &mdash; <code>azure_security_keyvault_secrets</code></td></tr>
+            <tr><td>STS</td><td>Entra identity token &mdash; <code>azure_identity</code></td></tr>
+          </tbody>
+        </table>
+        <p>Lambda (Functions) and SNS (Event Grid) have no Azure Rust SDK and are intentionally absent rather than shimmed over raw REST.</p>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Usage</h2>
+<pre>use Azure
+use Azure::Blob
+use Azure::Cosmos
+use Azure::Queue
+use Azure::Secrets
+
+# Connectivity probe (Entra token; the token value is never returned).
+val $tok = Azure::identity_token()
+p "expires: $tok->{expires_on}"
+
+# Blob Storage — az://container/blob URIs.
+Azure::Blob::put("az://data/hello.txt", data => "hi", account => "mystorage")
+val $body = Azure::Blob::get("az://data/hello.txt", account => "mystorage")
+
+# Storage Queues.
+Azure::Queue::send("jobs", "payload", account => "mystorage")
+val @msgs = Azure::Queue::receive("jobs", max => 10, account => "mystorage")
+
+# Cosmos DB (single-partition).
+Azure::Cosmos::put("appdb", "users", "acme",
+    { id => "u1", name => "ada", tier => "gold" })
+val $u = Azure::Cosmos::get("appdb", "users", "acme", "u1")
+
+# Key Vault Secrets.
+val $pw = Azure::Secrets::get("db-password", vault => "my-kv")</pre>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Connection options</h2>
+        <p>Each call takes a trailing <code>%opts</code> hash carrying the target account/vault. Authentication uses <code>DeveloperToolsCredential</code> &mdash; sign in with <code>az login</code> or <code>azd auth login</code> first.</p>
+        <table class="example-tbl">
+          <thead><tr><th>Service</th><th>Options</th></tr></thead>
+          <tbody>
+            <tr><td>Blob / Queue</td><td><code>account =&gt; "&lt;storageacct&gt;"</code> (or <code>AZURE_STORAGE_ACCOUNT</code>), or <code>endpoint =&gt; "https://..."</code></td></tr>
+            <tr><td>Cosmos</td><td><code>account =&gt; "&lt;cosmosacct&gt;"</code> (or <code>AZURE_COSMOS_ACCOUNT</code>), plus <code>region =&gt; "East US"</code></td></tr>
+            <tr><td>Secrets</td><td><code>vault =&gt; "&lt;kvname&gt;"</code> (or <code>AZURE_KEYVAULT_NAME</code>), or <code>vault_url</code></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Why a package, not a builtin</h2>
+        <p>The official Azure SDK for Rust crates pull in tokio, hyper, rustls, and reqwest, plus the typespec client-core and per-service generated models. That dependency tree ships once, on demand, as an opt-in package &mdash; stryke core is never linked against it.</p>
+        <p>The stryke side is a thin <code>.stk</code> wrapper; the heavy code lives in the <code>libstryke_azure</code> cdylib and is dlopened on first <code>use Azure</code>. The cdylib holds one shared tokio runtime and one Entra credential, reused across every service client &mdash; no per-call fork, no per-call credential rebuild.</p>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>FFI contract</h2>
+        <p>Each export is a <code>#[no_mangle] extern "C" fn azure__*</code> taking a JSON request string and returning a JSON response string. stryke's FFI bridge resolves these symbols at load. Handler errors and panics are caught and surfaced as <code>{"error": "..."}</code> &mdash; a panic never crosses the C ABI into the host shell.</p>
+<pre># the .stk wrapper decodes the JSON and dies on an {error} payload
+fn Azure::_decode ($name, $json) {
+    val $o = from_json $json
+    if (ref $o eq "HASH" &amp;&amp; exists $o-&gt;{error}) {
+        die "Azure::$name: $o-&gt;{error}"
+    }
+    $o
+}</pre>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Layout</h2>
+<pre>stryke-azure/
+&#9500;&#9472;&#9472; Cargo.toml             # cdylib crate (publish = false)
+&#9500;&#9472;&#9472; src/
+&#9474;   &#9492;&#9472;&#9472; lib.rs            # azure__* FFI exports + service ops
+&#9500;&#9472;&#9472; lib/                   # stryke .stk wrappers (Azure + namespaces)
+&#9500;&#9472;&#9472; stryke.toml            # stryke package manifest + ffi exports
+&#9500;&#9472;&#9472; t/                     # offline surface tests
+&#9500;&#9472;&#9472; examples/              # runnable .stk examples
+&#9500;&#9472;&#9472; Makefile               # `make install` builds + installs
+&#9492;&#9472;&#9472; docs/                  # this site (GitHub Pages)</pre>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Sibling packages</h2>
+        <p>Part of the stryke connector family. Browse the others via the <a href="https://github.com/MenkeTechnologies/MenkeTechnologiesMeta" target="_blank" rel="noopener noreferrer">MenkeTechnologiesMeta</a> umbrella repo:</p>
+        <ul>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-aws" target="_blank" rel="noopener noreferrer">stryke-aws</a> — S3, DynamoDB, SQS, Lambda, STS</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-gcp" target="_blank" rel="noopener noreferrer">stryke-gcp</a> — Cloud Storage + Pub/Sub</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-k8s" target="_blank" rel="noopener noreferrer">stryke-k8s</a> — Kubernetes</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-docker" target="_blank" rel="noopener noreferrer">stryke-docker</a> — Docker daemon API</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-mongo" target="_blank" rel="noopener noreferrer">stryke-mongo</a> — MongoDB</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-postgres" target="_blank" rel="noopener noreferrer">stryke-postgres</a> — PostgreSQL</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-redis" target="_blank" rel="noopener noreferrer">stryke-redis</a> — Redis / Valkey</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-kafka" target="_blank" rel="noopener noreferrer">stryke-kafka</a> — Apache Kafka</li>
+        </ul>
+      </section>
+
+    </main>
+  </div>
+  <script src="hud-theme.js"></script>
+</body>
+</html>
