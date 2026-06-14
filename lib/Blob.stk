@@ -68,3 +68,13 @@ fn Azure::Blob::rm ($uri, %opts) {
 fn Azure::Blob::containers (%opts) {
     Azure::blob_list_containers(%opts)
 }
+
+## Create the container. Returns 1 on success.
+fn Azure::Blob::create_container ($container, %opts) {
+    Azure::blob_create_container($container, %opts)
+}
+
+## Delete the container and all its blobs. Returns 1 on success.
+fn Azure::Blob::delete_container ($container, %opts) {
+    Azure::blob_delete_container($container, %opts)
+}

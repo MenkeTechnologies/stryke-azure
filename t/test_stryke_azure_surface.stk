@@ -89,4 +89,13 @@ assert_ok exists &Azure::Secrets::param_get, "Azure::Secrets::param_get exists"
 assert_ok exists &Azure::Secrets::param_put, "Azure::Secrets::param_put exists"
 assert_ok exists &Azure::Secrets::param_delete, "Azure::Secrets::param_delete exists"
 
+assert_ok exists &Azure::blob_create_container, "Azure::blob_create_container exists"
+assert_ok exists &Azure::blob_delete_container, "Azure::blob_delete_container exists"
+assert_ok exists &Azure::queue_create, "Azure::queue_create exists"
+assert_ok exists &Azure::queue_delete, "Azure::queue_delete exists"
+assert_ok exists &Azure::Blob::create_container, "Azure::Blob::create_container exists"
+assert_ok exists &Azure::Blob::delete_container, "Azure::Blob::delete_container exists"
+assert_ok exists &Azure::Queue::create, "Azure::Queue::create exists"
+assert_ok exists &Azure::Queue::drop, "Azure::Queue::drop exists"
+
 test_run

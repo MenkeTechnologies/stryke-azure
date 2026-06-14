@@ -214,3 +214,29 @@ fn Azure::secrets_delete ($name, %opts) {
     val $r = Azure::_req({ name => $name }, \%opts)
     Azure::_decode("secrets_delete", azure__secrets_delete(to_json($r)))->{deleted} ? 1 : 0
 }
+
+# ── container / queue lifecycle ──────────────────────────────────────
+
+## Create a blob container. Returns 1 on success.
+fn Azure::blob_create_container ($container, %opts) {
+    val $r = Azure::_req({ container => $container }, \%opts)
+    Azure::_decode("blob_create_container", azure__blob_create_container(to_json($r)))->{created} ? 1 : 0
+}
+
+## Delete a blob container (and everything in it). Returns 1 on success.
+fn Azure::blob_delete_container ($container, %opts) {
+    val $r = Azure::_req({ container => $container }, \%opts)
+    Azure::_decode("blob_delete_container", azure__blob_delete_container(to_json($r)))->{deleted} ? 1 : 0
+}
+
+## Create a storage queue. Returns 1 on success.
+fn Azure::queue_create ($queue, %opts) {
+    val $r = Azure::_req({ queue => $queue }, \%opts)
+    Azure::_decode("queue_create", azure__queue_create(to_json($r)))->{created} ? 1 : 0
+}
+
+## Delete a storage queue (and all its messages). Returns 1 on success.
+fn Azure::queue_delete ($queue, %opts) {
+    val $r = Azure::_req({ queue => $queue }, \%opts)
+    Azure::_decode("queue_delete", azure__queue_delete(to_json($r)))->{deleted} ? 1 : 0
+}

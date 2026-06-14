@@ -54,13 +54,17 @@ val $tok = Azure::identity_token()
 p "expires: $tok->{expires_on}"
 
 # Blob Storage — az://container/blob URIs.
+Azure::Blob::create_container("data", account => "mystorage")
 val @containers = Azure::Blob::containers(account => "mystorage")
 Azure::Blob::put("az://data/hello.txt", data => "hi", account => "mystorage")
 val $body = Azure::Blob::get("az://data/hello.txt", account => "mystorage")
+Azure::Blob::delete_container("data", account => "mystorage")
 
 # Storage Queues.
+Azure::Queue::create("jobs", account => "mystorage")
 Azure::Queue::send("jobs", "payload", account => "mystorage")
 val @msgs = Azure::Queue::receive("jobs", max => 10, account => "mystorage")
+Azure::Queue::drop("jobs", account => "mystorage")   # delete the whole queue
 
 # Cosmos DB (single-partition).
 Azure::Cosmos::put("appdb", "users", "acme",

@@ -57,3 +57,13 @@ fn Azure::Queue::pump ($queue, %opts) {
     }
     $processed
 }
+
+## Create the queue. Returns 1 on success.
+fn Azure::Queue::create ($queue, %opts) {
+    Azure::queue_create($queue, %opts)
+}
+
+## Delete the whole queue (not just a message). Returns 1 on success.
+fn Azure::Queue::drop ($queue, %opts) {
+    Azure::queue_delete($queue, %opts)
+}

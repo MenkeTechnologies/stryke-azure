@@ -246,6 +246,26 @@ async fn op_blob_properties(opts: Value) -> Result<Value> {
     }))
 }
 
+async fn op_blob_create_container(opts: Value) -> Result<Value> {
+    let client = blob_service(&opts)?;
+    let container = req_str(&opts, "container")?.to_string();
+    client
+        .blob_container_client(&container)
+        .create(None)
+        .await?;
+    Ok(json!({ "container": container, "created": true }))
+}
+
+async fn op_blob_delete_container(opts: Value) -> Result<Value> {
+    let client = blob_service(&opts)?;
+    let container = req_str(&opts, "container")?.to_string();
+    client
+        .blob_container_client(&container)
+        .delete(None)
+        .await?;
+    Ok(json!({ "container": container, "deleted": true }))
+}
+
 // ── Storage Queues (SQS analog) ──────────────────────────────────────────────
 
 fn queue_service(opts: &Value) -> Result<azure_storage_queue::clients::QueueServiceClient> {
@@ -343,6 +363,20 @@ async fn op_queue_properties(opts: Value) -> Result<Value> {
         "queue": queue,
         "approximate_message_count": r.approximate_messages_count()?,
     }))
+}
+
+async fn op_queue_create(opts: Value) -> Result<Value> {
+    let client = queue_service(&opts)?;
+    let queue = req_str(&opts, "queue")?.to_string();
+    client.queue_client(&queue)?.create(None).await?;
+    Ok(json!({ "queue": queue, "created": true }))
+}
+
+async fn op_queue_delete(opts: Value) -> Result<Value> {
+    let client = queue_service(&opts)?;
+    let queue = req_str(&opts, "queue")?.to_string();
+    client.queue_client(&queue)?.delete(None).await?;
+    Ok(json!({ "queue": queue, "deleted": true }))
 }
 
 // ── Cosmos DB NoSQL (DynamoDB analog) ────────────────────────────────────────
@@ -574,6 +608,8 @@ export!(azure__blob_get, op_blob_get);
 export!(azure__blob_put, op_blob_put);
 export!(azure__blob_delete, op_blob_delete);
 export!(azure__blob_properties, op_blob_properties);
+export!(azure__blob_create_container, op_blob_create_container);
+export!(azure__blob_delete_container, op_blob_delete_container);
 
 export!(azure__queue_list, op_queue_list);
 export!(azure__queue_send, op_queue_send);
@@ -581,6 +617,8 @@ export!(azure__queue_receive, op_queue_receive);
 export!(azure__queue_delete_message, op_queue_delete_message);
 export!(azure__queue_clear, op_queue_clear);
 export!(azure__queue_properties, op_queue_properties);
+export!(azure__queue_create, op_queue_create);
+export!(azure__queue_delete, op_queue_delete);
 
 export!(azure__cosmos_list_databases, op_cosmos_list_databases);
 export!(azure__cosmos_list_containers, op_cosmos_list_containers);
