@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    continue-on-error: ${{ matrix.allow_failure || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            dylib: libstryke_azure.so
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            dylib: libstryke_azure.so
+            allow_failure: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            dylib: libstryke_azure.dylib
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            dylib: libstryke_azure.dylib
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF##*/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build cdylib
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Stage release tarball
+        id: stage
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          TRIPLE="${{ matrix.target }}"
+          STEM="stryke-azure-${TAG}-${TRIPLE}"
+          mkdir -p "staging/${STEM}/lib"
+          cp stryke.toml "staging/${STEM}/"
+          cp lib/*.stk "staging/${STEM}/lib/"
+          cp "target/${TRIPLE}/release/${{ matrix.dylib }}" "staging/${STEM}/lib/"
+          ARCHIVE="${STEM}.tar.gz"
+          tar -C staging -czf "${ARCHIVE}" "${STEM}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${ARCHIVE}" | awk '{print $1}' > "${ARCHIVE}.sha256"
+          else
+            shasum -a 256 "${ARCHIVE}" | awk '{print $1}' > "${ARCHIVE}.sha256"
+          fi
+          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          files: |
+            ${{ steps.stage.outputs.archive }}
+            ${{ steps.stage.outputs.archive }}.sha256
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false
