@@ -1,0 +1,59 @@
+## lib/Queue.stk — `use Azure::Queue`
+##
+## Convenience wrappers around `Azure::queue_*`, modeled on the SQS
+## surface from stryke-aws. A queue is addressed by its name (the
+## storage account comes from the `account =>` opt or
+## AZURE_STORAGE_ACCOUNT).
+
+package Azure::Queue
+
+use Azure
+
+## List queue names in the account.
+fn Azure::Queue::ls (%opts) {
+    Azure::queue_list(%opts)
+}
+
+## Send $body to $queue. Returns the send-response hashref.
+fn Azure::Queue::send ($queue, $body, %opts) {
+    Azure::queue_send($queue, $body, %opts)
+}
+
+## Receive up to `max` messages (opts: max, visibility). Returns a list of
+## { message_id, pop_receipt, body, dequeue_count } hashrefs.
+fn Azure::Queue::receive ($queue, %opts) {
+    Azure::queue_receive($queue, %opts)
+}
+
+## Delete a received message by ($message_id, $pop_receipt). Returns 1 on success.
+fn Azure::Queue::delete ($queue, $message_id, $pop_receipt, %opts) {
+    Azure::queue_delete_message($queue, $message_id, $pop_receipt, %opts)
+}
+
+## Clear all messages from $queue. Returns 1 on success.
+fn Azure::Queue::clear ($queue, %opts) {
+    Azure::queue_clear($queue, %opts)
+}
+
+## Approximate message count for $queue.
+fn Azure::Queue::count ($queue, %opts) {
+    Azure::queue_properties($queue, %opts)->{approximate_message_count}
+}
+
+## Receive → callback → delete loop. opts: iterations (default 1), max,
+## visibility, callback (sub ($msg) {...}). Returns the number processed.
+fn Azure::Queue::pump ($queue, %opts) {
+    val $iterations = $opts{iterations} // 1
+    val $cb = $opts{callback} // die "Azure::Queue::pump: callback => sub {...} required"
+    var $processed = 0
+    for (var $i = 0; $i < $iterations; $i++) {
+        val @msgs = Azure::queue_receive($queue, max => $opts{max}, visibility => $opts{visibility})
+        last unless @msgs
+        for val $m (@msgs) {
+            $cb->($m)
+            Azure::queue_delete_message($queue, $m->{message_id}, $m->{pop_receipt}, %opts)
+            $processed++
+        }
+    }
+    $processed
+}

@@ -1,0 +1,216 @@
+## lib/Azure.stk — Azure client for stryke (`use Azure`).
+##
+## Thin wrapper around the `stryke-azure` cdylib's `azure__*` exports.
+## The cdylib is dlopened in-process on first `use Azure` (see stryke's
+## `pkg/commands.rs::try_load_ffi_for`) and registers each export as a
+## stryke-callable function via `rust_ffi::load_cdylib`.
+##
+## The cdylib holds one shared tokio runtime + one Entra credential
+## (DeveloperToolsCredential: Azure CLI / azd chain) reused across every
+## service client. Back-to-back calls reuse the same credential.
+##
+## Service map (AWS → Azure): Blob Storage (S3), Storage Queues (SQS),
+## Cosmos DB NoSQL (DynamoDB), Key Vault Secrets (Secrets Manager / SSM
+## Parameter Store), Entra identity token (STS). Lambda (Functions) and
+## SNS (Event Grid) have no Azure Rust SDK and are intentionally absent.
+##
+## Connection opts (passed as a trailing `%opts` hash) per service:
+##   Blob/Queue:  account => "<storageacct>"  (or AZURE_STORAGE_ACCOUNT),
+##                or endpoint => "https://..."
+##   Cosmos:      account => "<cosmosacct>"   (or AZURE_COSMOS_ACCOUNT),
+##                or endpoint => "https://...", region => "East US"
+##   Secrets:     vault => "<kvname>"         (or AZURE_KEYVAULT_NAME),
+##                or vault_url => "https://<kv>.vault.azure.net/"
+
+package Azure
+
+# ── error dispatch ────────────────────────────────────────────────────
+
+## Decode the cdylib's JSON return; die on `{error}` payload.
+fn Azure::_decode ($name, $json) {
+    val $o = from_json $json
+    if (ref $o eq "HASH" && exists $o->{error}) {
+        die "Azure::$name: $o->{error}"
+    }
+    $o
+}
+
+## Merge connection opts (account/endpoint/vault/region) into the FFI request.
+fn Azure::_req ($extra, $opts) {
+    var %r = %$extra
+    for val $k (qw(account endpoint vault vault_url region)) {
+        $r{$k} = $opts->{$k} if exists $opts->{$k} && defined $opts->{$k}
+    }
+    \%r
+}
+
+# ── version + identity ───────────────────────────────────────────────
+
+## Return the package version string.
+fn Azure::version {
+    Azure::_decode("pkg_version", azure__pkg_version("{}"))->{version}
+}
+
+## Acquire an Entra token for `scope` (default ARM). Returns
+## { acquired, scope, expires_on }. The token value itself is never returned.
+fn Azure::identity_token (%opts) {
+    val $r = Azure::_req({ scope => $opts{scope} }, \%opts)
+    Azure::_decode("identity_token", azure__identity_token(to_json($r)))
+}
+
+## Connectivity probe — returns 1 if a token can be acquired, else 0.
+fn Azure::ping (%opts) {
+    eval { Azure::identity_token(%opts); 1 } ? 1 : 0
+}
+
+# ── Blob Storage ─────────────────────────────────────────────────────
+
+## List blob container names in the storage account.
+fn Azure::blob_list_containers (%opts) {
+    @{ Azure::_decode("blob_list_containers",
+        azure__blob_list_containers(to_json(Azure::_req({}, \%opts))))->{containers} }
+}
+
+## List blobs in $container with `prefix => "..."`. Returns { name, size } rows.
+fn Azure::blob_list_blobs ($container, %opts) {
+    val $r = Azure::_req({ container => $container, prefix => $opts{prefix} }, \%opts)
+    @{ Azure::_decode("blob_list_blobs", azure__blob_list_blobs(to_json($r)))->{blobs} }
+}
+
+## Download a blob body as a scalar (string, or `base64:...` for binary).
+fn Azure::blob_get ($container, $name, %opts) {
+    val $r = Azure::_req({ container => $container, name => $name }, \%opts)
+    Azure::_decode("blob_get", azure__blob_get(to_json($r)))->{body}
+}
+
+## Upload $body to $container/$name. Returns 1 on success.
+fn Azure::blob_put ($container, $name, $body, %opts) {
+    val $r = Azure::_req({ container => $container, name => $name, body => $body }, \%opts)
+    Azure::_decode("blob_put", azure__blob_put(to_json($r)))->{uploaded} ? 1 : 0
+}
+
+## Delete $container/$name. Returns 1 on success.
+fn Azure::blob_delete ($container, $name, %opts) {
+    val $r = Azure::_req({ container => $container, name => $name }, \%opts)
+    Azure::_decode("blob_delete", azure__blob_delete(to_json($r)))->{deleted} ? 1 : 0
+}
+
+## Blob properties: { content_length, content_type, etag, last_modified, blob_type }.
+fn Azure::blob_properties ($container, $name, %opts) {
+    val $r = Azure::_req({ container => $container, name => $name }, \%opts)
+    Azure::_decode("blob_properties", azure__blob_properties(to_json($r)))
+}
+
+# ── Storage Queues ───────────────────────────────────────────────────
+
+## List queue names in the storage account.
+fn Azure::queue_list (%opts) {
+    @{ Azure::_decode("queue_list",
+        azure__queue_list(to_json(Azure::_req({}, \%opts))))->{queues} }
+}
+
+## Send $body to $queue. Returns the decoded send response hashref.
+fn Azure::queue_send ($queue, $body, %opts) {
+    val $r = Azure::_req({ queue => $queue, body => $body }, \%opts)
+    Azure::_decode("queue_send", azure__queue_send(to_json($r)))
+}
+
+## Receive up to `max` messages (opts: max, visibility seconds).
+## Returns a list of { message_id, pop_receipt, body, dequeue_count } hashrefs.
+fn Azure::queue_receive ($queue, %opts) {
+    val $r = Azure::_req(
+        { queue => $queue, max => $opts{max}, visibility => $opts{visibility} }, \%opts)
+    @{ Azure::_decode("queue_receive", azure__queue_receive(to_json($r)))->{messages} }
+}
+
+## Delete a received message by ($message_id, $pop_receipt). Returns 1 on success.
+fn Azure::queue_delete_message ($queue, $message_id, $pop_receipt, %opts) {
+    val $r = Azure::_req(
+        { queue => $queue, message_id => $message_id, pop_receipt => $pop_receipt }, \%opts)
+    Azure::_decode("queue_delete_message", azure__queue_delete_message(to_json($r)))->{deleted} ? 1 : 0
+}
+
+## Clear all messages from $queue. Returns 1 on success.
+fn Azure::queue_clear ($queue, %opts) {
+    val $r = Azure::_req({ queue => $queue }, \%opts)
+    Azure::_decode("queue_clear", azure__queue_clear(to_json($r)))->{cleared} ? 1 : 0
+}
+
+## Queue properties — { approximate_message_count }.
+fn Azure::queue_properties ($queue, %opts) {
+    val $r = Azure::_req({ queue => $queue }, \%opts)
+    Azure::_decode("queue_properties", azure__queue_properties(to_json($r)))
+}
+
+# ── Cosmos DB (NoSQL) ────────────────────────────────────────────────
+
+## List database ids in the Cosmos account.
+fn Azure::cosmos_list_databases (%opts) {
+    @{ Azure::_decode("cosmos_list_databases",
+        azure__cosmos_list_databases(to_json(Azure::_req({}, \%opts))))->{databases} }
+}
+
+## List container ids in $database.
+fn Azure::cosmos_list_containers ($database, %opts) {
+    val $r = Azure::_req({ database => $database }, \%opts)
+    @{ Azure::_decode("cosmos_list_containers", azure__cosmos_list_containers(to_json($r)))->{containers} }
+}
+
+## Upsert $item (hashref) into $database/$container with id $id under
+## partition key $pk. Returns the stored item hashref.
+fn Azure::cosmos_upsert_item ($database, $container, $pk, $id, $item, %opts) {
+    die "Azure::cosmos_upsert_item: item must be hashref" unless ref($item) eq "HASH"
+    val $r = Azure::_req(
+        { database => $database, container => $container,
+          partition_key => $pk, id => $id, item => $item }, \%opts)
+    Azure::_decode("cosmos_upsert_item", azure__cosmos_upsert_item(to_json($r)))->{item}
+}
+
+## Read item $id (partition key $pk) from $database/$container. Returns the item.
+fn Azure::cosmos_read_item ($database, $container, $pk, $id, %opts) {
+    val $r = Azure::_req(
+        { database => $database, container => $container, partition_key => $pk, id => $id }, \%opts)
+    Azure::_decode("cosmos_read_item", azure__cosmos_read_item(to_json($r)))->{item}
+}
+
+## Delete item $id (partition key $pk). Returns 1 on success.
+fn Azure::cosmos_delete_item ($database, $container, $pk, $id, %opts) {
+    val $r = Azure::_req(
+        { database => $database, container => $container, partition_key => $pk, id => $id }, \%opts)
+    Azure::_decode("cosmos_delete_item", azure__cosmos_delete_item(to_json($r)))->{deleted} ? 1 : 0
+}
+
+## Run a SQL $query against $database/$container scoped to partition key $pk
+## (single-partition only). Returns a list of item hashrefs.
+fn Azure::cosmos_query ($database, $container, $pk, $query, %opts) {
+    val $r = Azure::_req(
+        { database => $database, container => $container, partition_key => $pk, query => $query }, \%opts)
+    @{ Azure::_decode("cosmos_query", azure__cosmos_query(to_json($r)))->{items} }
+}
+
+# ── Key Vault Secrets ────────────────────────────────────────────────
+
+## Get a secret's value by name.
+fn Azure::secrets_get ($name, %opts) {
+    val $r = Azure::_req({ name => $name }, \%opts)
+    Azure::_decode("secrets_get", azure__secrets_get(to_json($r)))->{value}
+}
+
+## Set secret $name to $value (opts: content_type). Returns { name, id }.
+fn Azure::secrets_set ($name, $value, %opts) {
+    val $r = Azure::_req(
+        { name => $name, value => $value, content_type => $opts{content_type} }, \%opts)
+    Azure::_decode("secrets_set", azure__secrets_set(to_json($r)))
+}
+
+## List secrets as { id } hashrefs (id is the full secret URL).
+fn Azure::secrets_list (%opts) {
+    @{ Azure::_decode("secrets_list",
+        azure__secrets_list(to_json(Azure::_req({}, \%opts))))->{secrets} }
+}
+
+## Delete a secret by name. Returns 1 on success.
+fn Azure::secrets_delete ($name, %opts) {
+    val $r = Azure::_req({ name => $name }, \%opts)
+    Azure::_decode("secrets_delete", azure__secrets_delete(to_json($r)))->{deleted} ? 1 : 0
+}

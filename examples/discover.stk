@@ -1,0 +1,39 @@
+#!/usr/bin/env stryke
+# examples/discover.stk — minimum-viable tour of the `Azure` package.
+#
+# Runs end-to-end in CI: eval-guarded identity_token returns undef when
+# no Azure credential is reachable. Read-only ops only — no writes.
+#
+# Run:   s examples/discover.stk
+#        AZURE_STORAGE_ACCOUNT=myacct s examples/discover.stk
+
+use Azure
+use Azure::Blob
+
+p "=== Azure discover ==="
+p "version:        " . Azure::version()
+p "storage acct:   " . ($ENV{AZURE_STORAGE_ACCOUNT} // "(unset)")
+p "key vault:      " . ($ENV{AZURE_KEYVAULT_NAME}   // "(unset)")
+p ""
+
+val $tok = eval { Azure::identity_token() }
+val $have_creds = !$@ && defined $tok && $tok->{acquired}
+
+if ($have_creds) {
+    p "credential: reachable"
+    p "  token expires: $tok->{expires_on}"
+    if (defined $ENV{AZURE_STORAGE_ACCOUNT}) {
+        val @containers = eval { Azure::Blob::containers() }
+        if (!$@) {
+            p "  blob containers visible: " . scalar(@containers)
+        }
+    }
+} else {
+    p "credential: not reachable — skipping live ops"
+    p ""
+    p "expected call shape when live:"
+    p "  val \$tok        = Azure::identity_token()"
+    p "  val @containers = Azure::Blob::containers()"
+    p "  val \$body       = Azure::Blob::get(\"az://container/blob\")"
+    p "  val \$ok         = Azure::Cosmos::put(\$db, \$coll, \$pk, \\%item)"
+}

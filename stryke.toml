@@ -1,0 +1,45 @@
+[package]
+name = "stryke-azure"
+version = "0.1.0"
+description = "Azure client (Blob Storage, Storage Queues, Cosmos DB, Key Vault Secrets, Entra identity) for stryke. cdylib loaded in-process — persistent tokio runtime + shared Entra credential."
+authors = ["MenkeTechnologies"]
+license = "MIT"
+repository = "https://github.com/MenkeTechnologies/stryke-azure"
+edition = "2026"
+
+[ffi]
+lib-name = "stryke_azure"
+namespace = "Azure"
+exports = [
+    "azure__pkg_version",
+    "azure__identity_token",
+    "azure__blob_list_containers",
+    "azure__blob_list_blobs",
+    "azure__blob_get",
+    "azure__blob_put",
+    "azure__blob_delete",
+    "azure__blob_properties",
+    "azure__queue_list",
+    "azure__queue_send",
+    "azure__queue_receive",
+    "azure__queue_delete_message",
+    "azure__queue_clear",
+    "azure__queue_properties",
+    "azure__cosmos_list_databases",
+    "azure__cosmos_list_containers",
+    "azure__cosmos_upsert_item",
+    "azure__cosmos_read_item",
+    "azure__cosmos_delete_item",
+    "azure__cosmos_query",
+    "azure__secrets_get",
+    "azure__secrets_set",
+    "azure__secrets_list",
+    "azure__secrets_delete",
+]
+
+[scripts]
+build = "cargo build --release"
+build-debug = "cargo build"
+clean = "cargo clean"
+test = "s test t/"
+install = "s pkg install -g ."

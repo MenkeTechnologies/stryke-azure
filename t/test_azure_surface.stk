@@ -1,0 +1,33 @@
+#!/usr/bin/env stryke
+# t/test_azure_surface.stk — offline surface checks for the `Azure` package.
+#
+# These never touch the network: they exercise version reporting and the
+# error-dispatch contract (missing required opts must `die` with a clear
+# Azure::<op>: message rather than panicking the host). Live, credential-
+# backed round-trips are covered manually against a real subscription.
+
+use Azure
+
+# version() returns a non-empty string from the cdylib.
+val $v = Azure::version()
+die "version must be non-empty\n" unless defined $v && length($v)
+p "ok: version = $v"
+
+# A missing storage account surfaces as a thrown Azure::<op> error, not a
+# crash. (No account opt and, in CI, no AZURE_STORAGE_ACCOUNT env var.)
+delete $ENV{AZURE_STORAGE_ACCOUNT}
+val $threw = 0
+eval { Azure::blob_list_containers() }
+$threw = 1 if $@ && $@ =~ /Azure::/
+die "missing-account must throw an Azure:: error\n" unless $threw
+p "ok: missing account throws a clean Azure:: error"
+
+# A missing vault likewise throws rather than crashing.
+delete $ENV{AZURE_KEYVAULT_NAME}
+$threw = 0
+eval { Azure::secrets_list() }
+$threw = 1 if $@ && $@ =~ /Azure::/
+die "missing-vault must throw an Azure:: error\n" unless $threw
+p "ok: missing vault throws a clean Azure:: error"
+
+p "all surface checks passed"

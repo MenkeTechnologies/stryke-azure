@@ -1,0 +1,10 @@
+/target
+/tmp
+
+# Track Cargo.lock for binary crates — overrides ~/.gitignore_global *.lock.
+!Cargo.lock
+
+# Override the global `docs/` ignore — docs/ here is the project's
+# GitHub Pages content.
+!docs/
+!docs/*

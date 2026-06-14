@@ -1,0 +1,13 @@
+#!/usr/bin/env stryke
+# examples/blob_browse.stk — list a container prefix, print name + size.
+# Run:   AZURE_STORAGE_ACCOUNT=myacct s examples/blob_browse.stk az://my-container/some/prefix
+
+use Azure::Blob
+
+val $uri = $ARGV[0]
+die "usage: blob_browse.stk az://container/prefix\n" unless defined $uri
+
+val @entries = Azure::Blob::ls($uri)
+for val $e (@entries) {
+    p sprintf("  %12s  %s", ($e->{size} // "-"), $e->{name})
+}

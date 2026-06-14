@@ -1,0 +1,44 @@
+## lib/Cosmos.stk — `use Azure::Cosmos`
+##
+## Document-store wrappers around `Azure::cosmos_*`, modeled on the
+## DynamoDB surface from stryke-aws. A Cosmos NoSQL container is
+## addressed by ($database, $container); items carry an `id` and a
+## partition-key value.
+
+package Azure::Cosmos
+
+use Azure
+
+## List database ids in the account.
+fn Azure::Cosmos::databases (%opts) {
+    Azure::cosmos_list_databases(%opts)
+}
+
+## List container ids in $database.
+fn Azure::Cosmos::containers ($database, %opts) {
+    Azure::cosmos_list_containers($database, %opts)
+}
+
+## Upsert $item (hashref, must contain `id`) under partition key $pk.
+## Returns the stored item. The `id` field doubles as the document id.
+fn Azure::Cosmos::put ($database, $container, $pk, $item, %opts) {
+    die "Azure::Cosmos::put: item must be hashref" unless ref($item) eq "HASH"
+    val $id = $item->{id} // die "Azure::Cosmos::put: item needs an `id` field"
+    Azure::cosmos_upsert_item($database, $container, $pk, $id, $item, %opts)
+}
+
+## Read item $id under partition key $pk. Returns the item hashref or dies.
+fn Azure::Cosmos::get ($database, $container, $pk, $id, %opts) {
+    Azure::cosmos_read_item($database, $container, $pk, $id, %opts)
+}
+
+## Delete item $id under partition key $pk. Returns 1 on success.
+fn Azure::Cosmos::delete ($database, $container, $pk, $id, %opts) {
+    Azure::cosmos_delete_item($database, $container, $pk, $id, %opts)
+}
+
+## Run a SQL $query scoped to partition key $pk (single-partition only).
+## Returns a list of item hashrefs.
+fn Azure::Cosmos::query ($database, $container, $pk, $query, %opts) {
+    Azure::cosmos_query($database, $container, $pk, $query, %opts)
+}

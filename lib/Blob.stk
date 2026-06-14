@@ -1,0 +1,70 @@
+## lib/Blob.stk — `use Azure::Blob`
+##
+## URI-flavored wrappers around `Azure::blob_*`. Object URIs use the
+## `az://container/blob` form (the storage account comes from the
+## `account =>` opt or AZURE_STORAGE_ACCOUNT).
+
+package Azure::Blob
+
+use Azure
+
+## Internal: parse `az://container/blob` → ($container, $blob). `$blob` may be "".
+fn Azure::Blob::_parse ($uri) {
+    die "Azure::Blob: expected az://container/blob, got `$uri`" unless $uri =~ m{^az://([^/]+)/?(.*)$}
+    ($1, $2)
+}
+
+## List blobs under the URI prefix. Each row: { name, size }.
+fn Azure::Blob::ls ($uri, %opts) {
+    val ($container, $prefix) = Azure::Blob::_parse($uri)
+    Azure::blob_list_blobs($container, prefix => $prefix, %opts)
+}
+
+## Download the blob body. Pass `output => "/path"` to write to a file
+## and get the path back instead of the bytes.
+fn Azure::Blob::get ($uri, %opts) {
+    val ($container, $name) = Azure::Blob::_parse($uri)
+    val $body = Azure::blob_get($container, $name, %opts)
+    if (defined $opts{output}) {
+        open val $fh, ">", $opts{output} or die "Azure::Blob::get: open $opts{output}: $!"
+        print $fh $body
+        close $fh
+        return $opts{output}
+    }
+    $body
+}
+
+## Upload a scalar string OR a local file. Pass `data => $bytes` or
+## `input => "/local/path"`. Returns 1 on success.
+fn Azure::Blob::put ($uri, %opts) {
+    val ($container, $name) = Azure::Blob::_parse($uri)
+    var $body
+    if (defined $opts{data}) {
+        $body = $opts{data}
+    } elsif (defined $opts{input}) {
+        open val $fh, "<", $opts{input} or die "Azure::Blob::put: open $opts{input}: $!"
+        local $/
+        $body = <$fh>
+        close $fh
+    } else {
+        die "Azure::Blob::put: pass data => \$bytes or input => \"path\""
+    }
+    Azure::blob_put($container, $name, $body, %opts)
+}
+
+## Blob metadata for an az:// URI (content_length, content_type, etag, …).
+fn Azure::Blob::head ($uri, %opts) {
+    val ($container, $name) = Azure::Blob::_parse($uri)
+    Azure::blob_properties($container, $name, %opts)
+}
+
+## Delete a blob.
+fn Azure::Blob::rm ($uri, %opts) {
+    val ($container, $name) = Azure::Blob::_parse($uri)
+    Azure::blob_delete($container, $name, %opts)
+}
+
+## List container names — array of strings.
+fn Azure::Blob::containers (%opts) {
+    Azure::blob_list_containers(%opts)
+}
