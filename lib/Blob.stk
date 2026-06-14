@@ -78,3 +78,9 @@ fn Azure::Blob::create_container ($container, %opts) {
 fn Azure::Blob::delete_container ($container, %opts) {
     Azure::blob_delete_container($container, %opts)
 }
+
+## Set a blob's metadata (hashref of string => string). Returns keys-set count.
+fn Azure::Blob::set_metadata ($uri, $metadata, %opts) {
+    val ($container, $name) = Azure::Blob::_parse($uri)
+    Azure::blob_set_metadata($container, $name, $metadata, %opts)
+}

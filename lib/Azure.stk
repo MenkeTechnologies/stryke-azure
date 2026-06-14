@@ -256,3 +256,34 @@ fn Azure::cosmos_create_container ($database, $container, $partition_key, %opts)
         { database => $database, container => $container, partition_key => $partition_key }, \%opts)
     Azure::_decode("cosmos_create_container", azure__cosmos_create_container(to_json($r)))->{created} ? 1 : 0
 }
+
+# ── blob metadata + cosmos replace/delete ────────────────────────────
+
+## Set a blob's metadata ($metadata is a hashref of string => string).
+## Returns the number of keys set.
+fn Azure::blob_set_metadata ($container, $name, $metadata, %opts) {
+    die "Azure::blob_set_metadata: metadata must be hashref" unless ref($metadata) eq "HASH"
+    val $r = Azure::_req({ container => $container, name => $name, metadata => $metadata }, \%opts)
+    Azure::_decode("blob_set_metadata", azure__blob_set_metadata(to_json($r)))->{metadata}
+}
+
+## Delete a Cosmos database. Returns 1 on success.
+fn Azure::cosmos_delete_database ($database, %opts) {
+    val $r = Azure::_req({ database => $database }, \%opts)
+    Azure::_decode("cosmos_delete_database", azure__cosmos_delete_database(to_json($r)))->{deleted} ? 1 : 0
+}
+
+## Delete a Cosmos container. Returns 1 on success.
+fn Azure::cosmos_delete_container ($database, $container, %opts) {
+    val $r = Azure::_req({ database => $database, container => $container }, \%opts)
+    Azure::_decode("cosmos_delete_container", azure__cosmos_delete_container(to_json($r)))->{deleted} ? 1 : 0
+}
+
+## Replace an existing Cosmos item (fails if it doesn't exist). Returns the item.
+fn Azure::cosmos_replace_item ($database, $container, $pk, $id, $item, %opts) {
+    die "Azure::cosmos_replace_item: item must be hashref" unless ref($item) eq "HASH"
+    val $r = Azure::_req(
+        { database => $database, container => $container,
+          partition_key => $pk, id => $id, item => $item }, \%opts)
+    Azure::_decode("cosmos_replace_item", azure__cosmos_replace_item(to_json($r)))->{item}
+}

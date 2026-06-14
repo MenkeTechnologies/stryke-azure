@@ -103,4 +103,13 @@ assert_ok exists &Azure::cosmos_create_container, "Azure::cosmos_create_containe
 assert_ok exists &Azure::Cosmos::create_database, "Azure::Cosmos::create_database exists"
 assert_ok exists &Azure::Cosmos::create_container, "Azure::Cosmos::create_container exists"
 
+assert_ok exists &Azure::blob_set_metadata, "Azure::blob_set_metadata exists"
+assert_ok exists &Azure::cosmos_delete_database, "Azure::cosmos_delete_database exists"
+assert_ok exists &Azure::cosmos_delete_container, "Azure::cosmos_delete_container exists"
+assert_ok exists &Azure::cosmos_replace_item, "Azure::cosmos_replace_item exists"
+assert_ok exists &Azure::Blob::set_metadata, "Azure::Blob::set_metadata exists"
+assert_ok exists &Azure::Cosmos::delete_database, "Azure::Cosmos::delete_database exists"
+assert_ok exists &Azure::Cosmos::delete_container, "Azure::Cosmos::delete_container exists"
+assert_ok exists &Azure::Cosmos::replace, "Azure::Cosmos::replace exists"
+
 test_run

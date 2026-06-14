@@ -52,3 +52,20 @@ fn Azure::Cosmos::create_database ($database, %opts) {
 fn Azure::Cosmos::create_container ($database, $container, $partition_key, %opts) {
     Azure::cosmos_create_container($database, $container, $partition_key, %opts)
 }
+
+## Delete a database. Returns 1 on success.
+fn Azure::Cosmos::delete_database ($database, %opts) {
+    Azure::cosmos_delete_database($database, %opts)
+}
+
+## Delete a container. Returns 1 on success.
+fn Azure::Cosmos::delete_container ($database, $container, %opts) {
+    Azure::cosmos_delete_container($database, $container, %opts)
+}
+
+## Replace an existing item (id taken from $item->{id}). Fails if absent.
+fn Azure::Cosmos::replace ($database, $container, $pk, $item, %opts) {
+    die "Azure::Cosmos::replace: item must be hashref" unless ref($item) eq "HASH"
+    val $id = $item->{id} // die "Azure::Cosmos::replace: item needs an `id` field"
+    Azure::cosmos_replace_item($database, $container, $pk, $id, $item, %opts)
+}

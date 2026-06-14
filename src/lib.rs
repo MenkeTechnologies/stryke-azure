@@ -266,6 +266,28 @@ async fn op_blob_delete_container(opts: Value) -> Result<Value> {
     Ok(json!({ "container": container, "deleted": true }))
 }
 
+async fn op_blob_set_metadata(opts: Value) -> Result<Value> {
+    use std::collections::HashMap;
+    let client = blob_service(&opts)?;
+    let container = req_str(&opts, "container")?.to_string();
+    let name = req_str(&opts, "name")?.to_string();
+    let meta = opts
+        .get("metadata")
+        .and_then(|m| m.as_object())
+        .ok_or_else(|| anyhow!("missing metadata (an object of string => string)"))?;
+    // Azure blob metadata is a flat string→string map; non-string values are
+    // skipped rather than silently stringified.
+    let map: HashMap<String, String> = meta
+        .iter()
+        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+        .collect();
+    client
+        .blob_client(&container, &name)
+        .set_metadata(&map, None)
+        .await?;
+    Ok(json!({ "container": container, "name": name, "metadata": map.len() }))
+}
+
 // ── Storage Queues (SQS analog) ──────────────────────────────────────────────
 
 fn queue_service(opts: &Value) -> Result<azure_storage_queue::clients::QueueServiceClient> {
@@ -442,6 +464,13 @@ async fn op_cosmos_create_container(opts: Value) -> Result<Value> {
     Ok(json!({ "database": database, "container": id, "created": true }))
 }
 
+async fn op_cosmos_delete_database(opts: Value) -> Result<Value> {
+    let client = cosmos_client(&opts).await?;
+    let database = req_str(&opts, "database")?.to_string();
+    client.database_client(&database).delete(None).await?;
+    Ok(json!({ "database": database, "deleted": true }))
+}
+
 /// Resolve the `ContainerClient` for `database`/`container` opts.
 async fn cosmos_container(opts: &Value) -> Result<azure_data_cosmos::clients::ContainerClient> {
     let client = cosmos_client(opts).await?;
@@ -486,6 +515,31 @@ async fn op_cosmos_delete_item(opts: Value) -> Result<Value> {
     let id = req_str(&opts, "id")?.to_string();
     cc.delete_item(PartitionKey::from(pk), &id, None).await?;
     Ok(json!({ "id": id, "deleted": true }))
+}
+
+async fn op_cosmos_replace_item(opts: Value) -> Result<Value> {
+    use azure_data_cosmos::PartitionKey;
+    let cc = cosmos_container(&opts).await?;
+    let pk = req_str(&opts, "partition_key")?.to_string();
+    let id = req_str(&opts, "id")?.to_string();
+    let item = opts
+        .get("item")
+        .cloned()
+        .ok_or_else(|| anyhow!("missing item (object)"))?;
+    // Unlike upsert, replace fails if the item doesn't already exist.
+    let r = cc
+        .replace_item(PartitionKey::from(pk), &id, item, None)
+        .await?;
+    let body: Value = r.into_model()?;
+    Ok(json!({ "id": id, "item": body }))
+}
+
+async fn op_cosmos_delete_container(opts: Value) -> Result<Value> {
+    let cc = cosmos_container(&opts).await?;
+    let database = req_str(&opts, "database")?.to_string();
+    let container = req_str(&opts, "container")?.to_string();
+    cc.delete(None).await?;
+    Ok(json!({ "database": database, "container": container, "deleted": true }))
 }
 
 async fn op_cosmos_query(opts: Value) -> Result<Value> {
@@ -632,6 +686,7 @@ export!(azure__blob_delete, op_blob_delete);
 export!(azure__blob_properties, op_blob_properties);
 export!(azure__blob_create_container, op_blob_create_container);
 export!(azure__blob_delete_container, op_blob_delete_container);
+export!(azure__blob_set_metadata, op_blob_set_metadata);
 
 export!(azure__queue_list, op_queue_list);
 export!(azure__queue_send, op_queue_send);
@@ -646,6 +701,9 @@ export!(azure__cosmos_list_databases, op_cosmos_list_databases);
 export!(azure__cosmos_list_containers, op_cosmos_list_containers);
 export!(azure__cosmos_create_database, op_cosmos_create_database);
 export!(azure__cosmos_create_container, op_cosmos_create_container);
+export!(azure__cosmos_delete_database, op_cosmos_delete_database);
+export!(azure__cosmos_delete_container, op_cosmos_delete_container);
+export!(azure__cosmos_replace_item, op_cosmos_replace_item);
 export!(azure__cosmos_upsert_item, op_cosmos_upsert_item);
 export!(azure__cosmos_read_item, op_cosmos_read_item);
 export!(azure__cosmos_delete_item, op_cosmos_delete_item);
