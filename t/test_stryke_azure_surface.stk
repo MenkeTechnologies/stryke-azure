@@ -1,0 +1,92 @@
+## t/test_stryke_azure_surface.stk — wrapper-completeness pin.
+##
+## Asserts every public `fn X::Y::name` declared in lib/*.stk is
+## reachable via `use` at runtime. Uses `exists &X::Y::name` to probe
+## the symbol table without invoking the sub.
+##
+## Catches:
+##   * a wrapper sub deleted from lib/ but still referenced elsewhere
+##   * a sub-package file dropped from the install layout
+##   * `use Azure::Blob` failing to chase into lib/Blob.stk
+##   * an installed-package entry whose namespace bridge is broken
+##
+## Permission-free — no service, no creds, no live daemon. Private
+## helpers (`_` prefix) are implementation detail and are NOT asserted,
+## so refactoring internals stays free.
+
+use Azure
+use Azure::Blob
+use Azure::Queue
+use Azure::Cosmos
+use Azure::Secrets
+
+# ── Azure.stk: version + identity ───────────────────────────
+assert_ok exists &Azure::version, "Azure::version exists"
+assert_ok exists &Azure::identity_token, "Azure::identity_token exists"
+assert_ok exists &Azure::ping, "Azure::ping exists"
+
+# ── Azure.stk: Blob ─────────────────────────────────────────
+assert_ok exists &Azure::blob_list_containers, "Azure::blob_list_containers exists"
+assert_ok exists &Azure::blob_list_blobs, "Azure::blob_list_blobs exists"
+assert_ok exists &Azure::blob_get, "Azure::blob_get exists"
+assert_ok exists &Azure::blob_put, "Azure::blob_put exists"
+assert_ok exists &Azure::blob_delete, "Azure::blob_delete exists"
+assert_ok exists &Azure::blob_properties, "Azure::blob_properties exists"
+
+# ── Azure.stk: Queue ────────────────────────────────────────
+assert_ok exists &Azure::queue_list, "Azure::queue_list exists"
+assert_ok exists &Azure::queue_send, "Azure::queue_send exists"
+assert_ok exists &Azure::queue_receive, "Azure::queue_receive exists"
+assert_ok exists &Azure::queue_delete_message, "Azure::queue_delete_message exists"
+assert_ok exists &Azure::queue_clear, "Azure::queue_clear exists"
+assert_ok exists &Azure::queue_properties, "Azure::queue_properties exists"
+
+# ── Azure.stk: Cosmos ───────────────────────────────────────
+assert_ok exists &Azure::cosmos_list_databases, "Azure::cosmos_list_databases exists"
+assert_ok exists &Azure::cosmos_list_containers, "Azure::cosmos_list_containers exists"
+assert_ok exists &Azure::cosmos_upsert_item, "Azure::cosmos_upsert_item exists"
+assert_ok exists &Azure::cosmos_read_item, "Azure::cosmos_read_item exists"
+assert_ok exists &Azure::cosmos_delete_item, "Azure::cosmos_delete_item exists"
+assert_ok exists &Azure::cosmos_query, "Azure::cosmos_query exists"
+
+# ── Azure.stk: Secrets ──────────────────────────────────────
+assert_ok exists &Azure::secrets_get, "Azure::secrets_get exists"
+assert_ok exists &Azure::secrets_set, "Azure::secrets_set exists"
+assert_ok exists &Azure::secrets_list, "Azure::secrets_list exists"
+assert_ok exists &Azure::secrets_delete, "Azure::secrets_delete exists"
+
+# ── Blob.stk ────────────────────────────────────────────────
+assert_ok exists &Azure::Blob::ls, "Azure::Blob::ls exists"
+assert_ok exists &Azure::Blob::get, "Azure::Blob::get exists"
+assert_ok exists &Azure::Blob::put, "Azure::Blob::put exists"
+assert_ok exists &Azure::Blob::head, "Azure::Blob::head exists"
+assert_ok exists &Azure::Blob::rm, "Azure::Blob::rm exists"
+assert_ok exists &Azure::Blob::containers, "Azure::Blob::containers exists"
+
+# ── Queue.stk ───────────────────────────────────────────────
+assert_ok exists &Azure::Queue::ls, "Azure::Queue::ls exists"
+assert_ok exists &Azure::Queue::send, "Azure::Queue::send exists"
+assert_ok exists &Azure::Queue::receive, "Azure::Queue::receive exists"
+assert_ok exists &Azure::Queue::delete, "Azure::Queue::delete exists"
+assert_ok exists &Azure::Queue::clear, "Azure::Queue::clear exists"
+assert_ok exists &Azure::Queue::count, "Azure::Queue::count exists"
+assert_ok exists &Azure::Queue::pump, "Azure::Queue::pump exists"
+
+# ── Cosmos.stk ──────────────────────────────────────────────
+assert_ok exists &Azure::Cosmos::databases, "Azure::Cosmos::databases exists"
+assert_ok exists &Azure::Cosmos::containers, "Azure::Cosmos::containers exists"
+assert_ok exists &Azure::Cosmos::put, "Azure::Cosmos::put exists"
+assert_ok exists &Azure::Cosmos::get, "Azure::Cosmos::get exists"
+assert_ok exists &Azure::Cosmos::delete, "Azure::Cosmos::delete exists"
+assert_ok exists &Azure::Cosmos::query, "Azure::Cosmos::query exists"
+
+# ── Secrets.stk ─────────────────────────────────────────────
+assert_ok exists &Azure::Secrets::get, "Azure::Secrets::get exists"
+assert_ok exists &Azure::Secrets::set, "Azure::Secrets::set exists"
+assert_ok exists &Azure::Secrets::ls, "Azure::Secrets::ls exists"
+assert_ok exists &Azure::Secrets::rm, "Azure::Secrets::rm exists"
+assert_ok exists &Azure::Secrets::param_get, "Azure::Secrets::param_get exists"
+assert_ok exists &Azure::Secrets::param_put, "Azure::Secrets::param_put exists"
+assert_ok exists &Azure::Secrets::param_delete, "Azure::Secrets::param_delete exists"
+
+test_run

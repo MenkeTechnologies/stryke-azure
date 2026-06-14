@@ -1,0 +1,112 @@
+## t/test_azure.stk — assertion tests for the stryke `Azure` package.
+##
+## Uses stryke's native test framework (`assert_*` + `test_run`).
+## Requires the cdylib to be loaded — install once with `s pkg install -g .`
+## so stryke's FFI bridge dlopens `lib/libstryke_azure.{dylib,so}` on `use Azure`.
+##
+## Service-dependent assertions only fire when:
+##   * an Entra credential is reachable (identity_token succeeds), AND
+##   * the relevant account/vault + $STRYKE_AZURE_TEST_* env var is set.
+## The permission-free assertions (version + cdylib loaded) always run, so
+## CI without Azure access still exercises the FFI surface.
+##
+## Env vars consumed:
+##   AZURE_STORAGE_ACCOUNT          + STRYKE_AZURE_TEST_CONTAINER  (Blob)
+##   AZURE_STORAGE_ACCOUNT          + STRYKE_AZURE_TEST_QUEUE      (Queue)
+##   AZURE_COSMOS_ACCOUNT           + STRYKE_AZURE_TEST_COSMOS_DB
+##                                  + STRYKE_AZURE_TEST_COSMOS_CONTAINER  (Cosmos)
+##   AZURE_KEYVAULT_NAME                                          (Secrets)
+
+use Azure
+use Azure::Blob
+use Azure::Queue
+use Azure::Cosmos
+use Azure::Secrets
+
+# ── permission-free: cdylib reachable ───────────────────────────────
+val $version = Azure::version()
+assert_ok $version, "Azure::version returns truthy (cdylib loaded)"
+
+# ── credential probe ────────────────────────────────────────────────
+val $tok = eval { Azure::identity_token() }
+val $have_creds = !$@ && defined $tok && $tok->{acquired}
+
+if ($have_creds) {
+    assert_ok defined $tok->{expires_on}, "identity_token returns expires_on"
+    assert_ok Azure::ping(), "ping returns truthy when creds present"
+
+    # ── Blob round-trip (AZURE_STORAGE_ACCOUNT + STRYKE_AZURE_TEST_CONTAINER) ──
+    val $acct = $ENV{AZURE_STORAGE_ACCOUNT}
+    val $container = $ENV{STRYKE_AZURE_TEST_CONTAINER}
+    if (defined $acct && defined $container) {
+        val $name = "stryke-azure-test/$$/" . time() . ".txt"
+        val $uri = "az://$container/$name"
+        val $body = "hello-from-stryke-azure-$$"
+
+        assert_ok Azure::Blob::put($uri, data => $body, account => $acct),
+            "blob put returns truthy"
+        assert_eq Azure::Blob::get($uri, account => $acct), $body,
+            "blob get round-trip"
+        assert_eq Azure::Blob::head($uri, account => $acct)->{content_length}, len($body),
+            "blob head content_length matches body"
+        val @ls = Azure::Blob::ls("az://$container/stryke-azure-test/$$/", account => $acct)
+        assert_ge scalar(@ls), 1, "blob ls finds at least our object"
+        Azure::Blob::rm($uri, account => $acct)
+        assert_ok 1, "blob rm completed without dying"
+    }
+
+    # ── Queue round-trip (AZURE_STORAGE_ACCOUNT + STRYKE_AZURE_TEST_QUEUE) ──
+    val $queue = $ENV{STRYKE_AZURE_TEST_QUEUE}
+    if (defined $acct && defined $queue) {
+        val $msg = "msg-from-stryke-azure-$$-" . time()
+        Azure::Queue::send($queue, $msg, account => $acct)
+        assert_ok 1, "queue send completed without dying"
+        val @msgs = Azure::Queue::receive($queue, max => 5, account => $acct)
+        var $found
+        for val $m (@msgs) {
+            if ($m->{body} eq $msg) {
+                $found = $m
+                last
+            }
+        }
+        assert_ok defined $found, "queue receive finds our body"
+        if (defined $found) {
+            Azure::Queue::delete($queue, $found->{message_id}, $found->{pop_receipt}, account => $acct)
+            assert_ok 1, "queue delete completed without dying"
+        }
+    }
+
+    # ── Cosmos round-trip (AZURE_COSMOS_ACCOUNT + DB + CONTAINER) ──
+    # The target container's partition-key path must be `/pk`.
+    val $cacct = $ENV{AZURE_COSMOS_ACCOUNT}
+    val $cdb = $ENV{STRYKE_AZURE_TEST_COSMOS_DB}
+    val $ccoll = $ENV{STRYKE_AZURE_TEST_COSMOS_CONTAINER}
+    if (defined $cacct && defined $cdb && defined $ccoll) {
+        val $pk = "stryke-azure-test"
+        val $id = "item-$$-" . time()
+        val $item = { id => $id, pk => $pk, name => "ada", n => 42 }
+
+        val $put = Azure::Cosmos::put($cdb, $ccoll, $pk, $item, account => $cacct)
+        assert_eq $put->{name}, "ada", "cosmos put round-trip name"
+        val $got = Azure::Cosmos::get($cdb, $ccoll, $pk, $id, account => $cacct)
+        assert_eq $got->{n}, 42, "cosmos get round-trip n"
+        Azure::Cosmos::delete($cdb, $ccoll, $pk, $id, account => $cacct)
+        assert_ok 1, "cosmos delete completed without dying"
+    }
+
+    # ── Key Vault Secrets round-trip (AZURE_KEYVAULT_NAME) ──
+    val $vault = $ENV{AZURE_KEYVAULT_NAME}
+    if (defined $vault) {
+        val $sname = "stryke-azure-test-$$"
+        val $sval = "secret-$$-" . time()
+
+        val $set = Azure::Secrets::set($sname, $sval, vault => $vault)
+        assert_ok defined $set->{id}, "secrets set returns id"
+        assert_eq Azure::Secrets::get($sname, vault => $vault), $sval,
+            "secrets get round-trip"
+        Azure::Secrets::rm($sname, vault => $vault)
+        assert_ok 1, "secrets delete completed without dying"
+    }
+}
+
+test_run
