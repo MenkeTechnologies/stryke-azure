@@ -240,3 +240,19 @@ fn Azure::queue_delete ($queue, %opts) {
     val $r = Azure::_req({ queue => $queue }, \%opts)
     Azure::_decode("queue_delete", azure__queue_delete(to_json($r)))->{deleted} ? 1 : 0
 }
+
+# ── cosmos database/container creation ───────────────────────────────
+
+## Create a Cosmos database by id. Returns 1 on success.
+fn Azure::cosmos_create_database ($database, %opts) {
+    val $r = Azure::_req({ database => $database }, \%opts)
+    Azure::_decode("cosmos_create_database", azure__cosmos_create_database(to_json($r)))->{created} ? 1 : 0
+}
+
+## Create a Cosmos container in $database with partition key path $partition_key
+## (e.g. "/tenantId"). Returns 1 on success.
+fn Azure::cosmos_create_container ($database, $container, $partition_key, %opts) {
+    val $r = Azure::_req(
+        { database => $database, container => $container, partition_key => $partition_key }, \%opts)
+    Azure::_decode("cosmos_create_container", azure__cosmos_create_container(to_json($r)))->{created} ? 1 : 0
+}

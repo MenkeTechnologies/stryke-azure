@@ -31,6 +31,8 @@ exports = [
     "azure__queue_delete",
     "azure__cosmos_list_databases",
     "azure__cosmos_list_containers",
+    "azure__cosmos_create_database",
+    "azure__cosmos_create_container",
     "azure__cosmos_upsert_item",
     "azure__cosmos_read_item",
     "azure__cosmos_delete_item",

@@ -420,6 +420,28 @@ async fn op_cosmos_list_containers(opts: Value) -> Result<Value> {
     Ok(json!({ "database": database, "containers": containers }))
 }
 
+async fn op_cosmos_create_database(opts: Value) -> Result<Value> {
+    let client = cosmos_client(&opts).await?;
+    let id = req_str(&opts, "database")?.to_string();
+    client.create_database(&id, None).await?;
+    Ok(json!({ "database": id, "created": true }))
+}
+
+async fn op_cosmos_create_container(opts: Value) -> Result<Value> {
+    use azure_data_cosmos::models::{ContainerProperties, PartitionKeyDefinition};
+    let client = cosmos_client(&opts).await?;
+    let database = req_str(&opts, "database")?.to_string();
+    let id = req_str(&opts, "container")?.to_string();
+    // Partition key path, e.g. "/tenantId". Required by Cosmos for new containers.
+    let pk = req_str(&opts, "partition_key")?;
+    let props = ContainerProperties::new(id.clone(), PartitionKeyDefinition::from(pk));
+    client
+        .database_client(&database)
+        .create_container(props, None)
+        .await?;
+    Ok(json!({ "database": database, "container": id, "created": true }))
+}
+
 /// Resolve the `ContainerClient` for `database`/`container` opts.
 async fn cosmos_container(opts: &Value) -> Result<azure_data_cosmos::clients::ContainerClient> {
     let client = cosmos_client(opts).await?;
@@ -622,6 +644,8 @@ export!(azure__queue_delete, op_queue_delete);
 
 export!(azure__cosmos_list_databases, op_cosmos_list_databases);
 export!(azure__cosmos_list_containers, op_cosmos_list_containers);
+export!(azure__cosmos_create_database, op_cosmos_create_database);
+export!(azure__cosmos_create_container, op_cosmos_create_container);
 export!(azure__cosmos_upsert_item, op_cosmos_upsert_item);
 export!(azure__cosmos_read_item, op_cosmos_read_item);
 export!(azure__cosmos_delete_item, op_cosmos_delete_item);

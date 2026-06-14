@@ -42,3 +42,13 @@ fn Azure::Cosmos::delete ($database, $container, $pk, $id, %opts) {
 fn Azure::Cosmos::query ($database, $container, $pk, $query, %opts) {
     Azure::cosmos_query($database, $container, $pk, $query, %opts)
 }
+
+## Create a database by id. Returns 1 on success.
+fn Azure::Cosmos::create_database ($database, %opts) {
+    Azure::cosmos_create_database($database, %opts)
+}
+
+## Create a container with partition key path $partition_key (e.g. "/tenantId").
+fn Azure::Cosmos::create_container ($database, $container, $partition_key, %opts) {
+    Azure::cosmos_create_container($database, $container, $partition_key, %opts)
+}

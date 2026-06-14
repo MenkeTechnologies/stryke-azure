@@ -67,6 +67,8 @@ val @msgs = Azure::Queue::receive("jobs", max => 10, account => "mystorage")
 Azure::Queue::drop("jobs", account => "mystorage")   # delete the whole queue
 
 # Cosmos DB (single-partition).
+Azure::Cosmos::create_database("appdb", account => "mycosmos")
+Azure::Cosmos::create_container("appdb", "users", "/tenant", account => "mycosmos")
 Azure::Cosmos::put("appdb", "users", "acme",
     { id => "u1", name => "ada", tier => "gold" })
 val $u = Azure::Cosmos::get("appdb", "users", "acme", "u1")

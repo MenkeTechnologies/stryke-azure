@@ -98,4 +98,9 @@ assert_ok exists &Azure::Blob::delete_container, "Azure::Blob::delete_container 
 assert_ok exists &Azure::Queue::create, "Azure::Queue::create exists"
 assert_ok exists &Azure::Queue::drop, "Azure::Queue::drop exists"
 
+assert_ok exists &Azure::cosmos_create_database, "Azure::cosmos_create_database exists"
+assert_ok exists &Azure::cosmos_create_container, "Azure::cosmos_create_container exists"
+assert_ok exists &Azure::Cosmos::create_database, "Azure::Cosmos::create_database exists"
+assert_ok exists &Azure::Cosmos::create_container, "Azure::Cosmos::create_container exists"
+
 test_run
