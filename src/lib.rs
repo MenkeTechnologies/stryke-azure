@@ -758,6 +758,139 @@ pub unsafe extern "C" fn stryke_free_cstring(p: *mut c_char) {
     drop(CString::from_raw(p));
 }
 
+// ── pure helpers (no Azure) ──────────────────────────────────────────────────
+
+/// Parse an Azure resource ID `/subscriptions/{sub}/resourceGroups/{rg}/
+/// providers/{provider}/{type}/{name}[/{type}/{name}…]` into its parts.
+/// `resource_type`/`name` are the last type/name pair. Pure.
+fn op_parse_resource_id(opts: Value) -> Result<Value> {
+    let id = opts
+        .get("id")
+        .or_else(|| opts.get("resource_id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing id"))?;
+    let segs: Vec<&str> = id.split('/').filter(|s| !s.is_empty()).collect();
+    if segs.is_empty() {
+        return Err(anyhow!("empty resource id"));
+    }
+    let mut subscription = Value::Null;
+    let mut resource_group = Value::Null;
+    let mut provider = Value::Null;
+    let mut types: Vec<Value> = Vec::new();
+    let mut i = 0;
+    let mut in_resource = false;
+    while i < segs.len() {
+        if !in_resource {
+            match segs[i].to_ascii_lowercase().as_str() {
+                "subscriptions" if i + 1 < segs.len() => {
+                    subscription = json!(segs[i + 1]);
+                    i += 2;
+                }
+                "resourcegroups" if i + 1 < segs.len() => {
+                    resource_group = json!(segs[i + 1]);
+                    i += 2;
+                }
+                "providers" if i + 1 < segs.len() => {
+                    provider = json!(segs[i + 1]);
+                    i += 2;
+                    in_resource = true;
+                }
+                _ => i += 1,
+            }
+        } else if i + 1 < segs.len() {
+            types.push(json!({"type": segs[i], "name": segs[i + 1]}));
+            i += 2;
+        } else {
+            types.push(json!({"type": segs[i], "name": Value::Null}));
+            i += 1;
+        }
+    }
+    let (resource_type, name) = match types.last() {
+        Some(last) => (last["type"].clone(), last["name"].clone()),
+        None => (Value::Null, Value::Null),
+    };
+    Ok(json!({
+        "subscription": subscription,
+        "resource_group": resource_group,
+        "provider": provider,
+        "types": types,
+        "resource_type": resource_type,
+        "name": name,
+    }))
+}
+
+/// Parse an Azure connection string `Key=Value;Key=Value…` into a map. The
+/// value keeps everything after the first `=`, so base64 `AccountKey` padding
+/// (`==`) survives. Pure.
+fn op_parse_connection_string(opts: Value) -> Result<Value> {
+    let cs = opts
+        .get("connection_string")
+        .or_else(|| opts.get("dsn"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing connection_string"))?;
+    let mut map = serde_json::Map::new();
+    for pair in cs.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+        match pair.split_once('=') {
+            Some((k, v)) => {
+                map.insert(k.trim().to_string(), json!(v));
+            }
+            None => return Err(anyhow!("malformed pair (no `=`): {pair}")),
+        }
+    }
+    if map.is_empty() {
+        return Err(anyhow!("empty connection string"));
+    }
+    Ok(json!({"pairs": Value::Object(map)}))
+}
+
+/// Validate an Azure storage account name: 3–24 chars, lowercase letters and
+/// numbers only. Returns `{valid, reason}`. Pure.
+fn op_valid_storage_account_name(opts: Value) -> Result<Value> {
+    let name = opts
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing name"))?;
+    let reason: Option<&str> = if name.len() < 3 || name.len() > 24 {
+        Some("must be 3-24 characters")
+    } else if !name
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    {
+        Some("only lowercase letters and numbers")
+    } else {
+        None
+    };
+    Ok(json!({"name": name, "valid": reason.is_none(), "reason": reason}))
+}
+
+/// Validate an Azure Blob container name: 3–63 chars of `[a-z0-9-]`, start
+/// alphanumeric, no consecutive hyphens, no trailing hyphen. Returns
+/// `{valid, reason}`. Pure.
+fn op_valid_container_name(opts: Value) -> Result<Value> {
+    let name = opts
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing name"))?;
+    let bytes = name.as_bytes();
+    let reason: Option<&str> = if name.len() < 3 || name.len() > 63 {
+        Some("must be 3-63 characters")
+    } else if !name
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        Some("only lowercase letters, numbers, and hyphens")
+    } else if !bytes[0].is_ascii_alphanumeric() {
+        Some("must start with a letter or number")
+    } else if name.contains("--") {
+        Some("must not contain consecutive hyphens")
+    } else if bytes[bytes.len() - 1] == b'-' {
+        Some("must not end with a hyphen")
+    } else {
+        None
+    };
+    Ok(json!({"name": name, "valid": reason.is_none(), "reason": reason}))
+}
+
 // ── exports ──────────────────────────────────────────────────────────────────
 
 macro_rules! export {
@@ -818,6 +951,29 @@ export!(azure__secrets_backup, op_secrets_backup);
 
 export!(azure__keys_encrypt, op_keys_encrypt);
 export!(azure__keys_decrypt, op_keys_decrypt);
+
+#[no_mangle]
+pub extern "C" fn azure__parse_resource_id(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_parse_resource_id(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__parse_connection_string(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_parse_connection_string(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__valid_storage_account_name(args: *const c_char) -> *const c_char {
+    ffi_call_async(
+        args,
+        |opts| async move { op_valid_storage_account_name(opts) },
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn azure__valid_container_name(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_valid_container_name(opts) })
+}
 
 // ── tests ────────────────────────────────────────────────────────────────────
 
@@ -947,5 +1103,92 @@ mod ffi_tests {
         assert_eq!(v["region"], json!("eu-wést-1"));
         assert_eq!(v["nested"]["n"], json!(42));
         assert!(v.get("error").is_none());
+    }
+
+    // ── pure helpers (no Azure) ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_resource_id_full_path() {
+        let v = op_parse_resource_id(json!({
+            "id": "/subscriptions/abc-123/resourceGroups/my-rg/providers/Microsoft.Storage/storageAccounts/mystore"
+        }))
+        .unwrap();
+        assert_eq!(v["subscription"], json!("abc-123"));
+        assert_eq!(v["resource_group"], json!("my-rg"));
+        assert_eq!(v["provider"], json!("Microsoft.Storage"));
+        assert_eq!(v["resource_type"], json!("storageAccounts"));
+        assert_eq!(v["name"], json!("mystore"));
+    }
+
+    #[test]
+    fn parse_resource_id_nested_type_takes_last_pair() {
+        let v = op_parse_resource_id(json!({
+            "id": "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/acct/blobServices/default"
+        }))
+        .unwrap();
+        let types = v["types"].as_array().unwrap();
+        assert_eq!(types.len(), 2, "two type/name pairs");
+        assert_eq!(
+            v["resource_type"],
+            json!("blobServices"),
+            "last pair is the resource"
+        );
+        assert_eq!(v["name"], json!("default"));
+    }
+
+    #[test]
+    fn parse_connection_string_keeps_base64_account_key() {
+        let v = op_parse_connection_string(json!({
+            "connection_string": "DefaultEndpointsProtocol=https;AccountName=mystore;AccountKey=Zm9vYmFyYmF6==;EndpointSuffix=core.windows.net"
+        }))
+        .unwrap();
+        assert_eq!(v["pairs"]["AccountName"], json!("mystore"));
+        assert_eq!(
+            v["pairs"]["AccountKey"],
+            json!("Zm9vYmFyYmF6=="),
+            "value keeps everything after the first = (base64 padding survives)"
+        );
+        assert_eq!(v["pairs"]["EndpointSuffix"], json!("core.windows.net"));
+        assert!(
+            op_parse_connection_string(json!({"connection_string": "no-equals-here"})).is_err()
+        );
+    }
+
+    #[test]
+    fn valid_storage_account_name_rules() {
+        assert_eq!(
+            op_valid_storage_account_name(json!({"name": "mystore123"})).unwrap()["valid"],
+            json!(true)
+        );
+        for (name, want) in [
+            ("ab", "3-24"),
+            ("My-Store", "lowercase letters and numbers"),
+        ] {
+            let v = op_valid_storage_account_name(json!({"name": name})).unwrap();
+            assert_eq!(v["valid"], json!(false), "{name}");
+            assert!(v["reason"].as_str().unwrap().contains(want), "{name}");
+        }
+    }
+
+    #[test]
+    fn valid_container_name_rules() {
+        assert_eq!(
+            op_valid_container_name(json!({"name": "my-logs-2025"})).unwrap()["valid"],
+            json!(true)
+        );
+        for (name, want) in [
+            ("ab", "3-63"),
+            ("Bad", "lowercase"),
+            ("a--b", "consecutive hyphens"),
+            ("bad-", "end with a hyphen"),
+        ] {
+            let v = op_valid_container_name(json!({"name": name})).unwrap();
+            assert_eq!(v["valid"], json!(false), "{name}");
+            assert!(
+                v["reason"].as_str().unwrap().contains(want),
+                "{name}: {}",
+                v["reason"]
+            );
+        }
     }
 }

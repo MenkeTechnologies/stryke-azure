@@ -97,6 +97,17 @@ Each call takes a trailing `%opts` hash carrying the target account/vault:
 Authentication uses `DeveloperToolsCredential`: sign in with `az login` (or `azd
 auth login`) before running.
 
+### Pure helpers (no Azure)
+
+These open no client — credential-free string parsing/validation:
+
+```stryke
+Azure::parse_resource_id($id)            # /subscriptions/.../providers/... → { subscription, resource_group, provider, types, resource_type, name }
+Azure::parse_connection_string($cs)      # Key=Value;... → { pairs => { Key => Value } } (base64 AccountKey survives)
+Azure::valid_storage_account_name($name) # { name, valid, reason } — 3-24 lowercase alphanumerics
+Azure::valid_container_name($name)       # { name, valid, reason } — Blob container rules
+```
+
 ## Packages
 
 | Package | Surface |

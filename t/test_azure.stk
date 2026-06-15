@@ -109,4 +109,24 @@ if ($have_creds) {
     }
 }
 
+# ── pure helpers (no Azure — always run) ─────────────────────────────
+val $rid = Azure::parse_resource_id("/subscriptions/abc-123/resourceGroups/my-rg/providers/Microsoft.Storage/storageAccounts/mystore")
+assert_eq $rid->{subscription},   "abc-123",           "parse_resource_id: subscription"
+assert_eq $rid->{resource_group}, "my-rg",             "parse_resource_id: resource group"
+assert_eq $rid->{provider},       "Microsoft.Storage", "parse_resource_id: provider"
+assert_eq $rid->{resource_type},  "storageAccounts",   "parse_resource_id: type"
+assert_eq $rid->{name},           "mystore",           "parse_resource_id: name"
+
+val $cs = Azure::parse_connection_string("DefaultEndpointsProtocol=https;AccountName=mystore;AccountKey=Zm9vYmF6==;EndpointSuffix=core.windows.net")
+assert_eq $cs->{pairs}{AccountName}, "mystore",        "parse_connection_string: account name"
+assert_eq $cs->{pairs}{AccountKey},  "Zm9vYmF6==",     "parse_connection_string: base64 key survives"
+
+assert_ok Azure::valid_storage_account_name("mystore123")->{valid}, "valid_storage_account_name: legal"
+assert_eq Azure::valid_storage_account_name("My-Store")->{valid}, 0, "valid_storage_account_name: rejects upper+hyphen"
+
+assert_ok Azure::valid_container_name("my-logs-2025")->{valid}, "valid_container_name: legal"
+val $cn = Azure::valid_container_name("a--b")
+assert_eq $cn->{valid}, 0, "valid_container_name: rejects consecutive hyphens"
+assert_match qr/consecutive/, $cn->{reason}, "valid_container_name: reason names the rule"
+
 test_run

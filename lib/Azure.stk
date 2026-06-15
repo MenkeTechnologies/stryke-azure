@@ -320,3 +320,34 @@ fn Azure::keys_decrypt ($key, $version, $ciphertext, %opts) {
           algorithm => $opts{algorithm} }, \%opts)
     Azure::_decode("keys_decrypt", azure__keys_decrypt(to_json($r)))->{plaintext}
 }
+
+# ── pure helpers (no Azure) ───────────────────────────────────────────
+
+## Parse an Azure resource ID into a hashref { subscription, resource_group,
+## provider, types => [{ type, name }], resource_type, name }. resource_type/
+## name are the last type/name pair.
+fn Azure::parse_resource_id ($id) {
+    Azure::_decode("parse_resource_id", azure__parse_resource_id(to_json({ id => $id })))
+}
+
+## Parse an Azure connection string "Key=Value;Key=Value…" into a hashref of
+## { pairs => { Key => Value } }. Values keep everything after the first "=",
+## so a base64 AccountKey survives.
+fn Azure::parse_connection_string ($cs) {
+    Azure::_decode("parse_connection_string",
+        azure__parse_connection_string(to_json({ connection_string => $cs })))
+}
+
+## Validate a storage account name (3-24 lowercase letters/numbers). Returns
+## { name, valid, reason }.
+fn Azure::valid_storage_account_name ($name) {
+    Azure::_decode("valid_storage_account_name",
+        azure__valid_storage_account_name(to_json({ name => $name })))
+}
+
+## Validate a Blob container name (3-63 chars of [a-z0-9-], start alphanumeric,
+## no consecutive/trailing hyphens). Returns { name, valid, reason }.
+fn Azure::valid_container_name ($name) {
+    Azure::_decode("valid_container_name",
+        azure__valid_container_name(to_json({ name => $name })))
+}
