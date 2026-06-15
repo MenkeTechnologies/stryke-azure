@@ -131,6 +131,12 @@ val $dfs = Azure::parse_blob_uri("https://lake.dfs.core.windows.net/fs")
 assert_eq $dfs->{service}, "dfs",            "parse_blob_uri: ADLS Gen2 dfs service"
 assert_ok !defined($dfs->{blob}),            "parse_blob_uri: container-only URL has undef blob"
 
+# build_blob_uri: inverse of parse_blob_uri.
+assert_eq Azure::build_blob_uri(account => "mystore", container => "images", blob => "2025/cat.png"), "https://mystore.blob.core.windows.net/images/2025/cat.png", "build_blob_uri: full endpoint URL"
+assert_eq Azure::build_blob_uri(account => "lake", service => "dfs", container => "fs"), "https://lake.dfs.core.windows.net/fs", "build_blob_uri: dfs service"
+assert_eq Azure::build_blob_uri(account => "acct"), "https://acct.blob.core.windows.net", "build_blob_uri: account-only endpoint"
+assert_dies fn { Azure::build_blob_uri(container => "c") }, "build_blob_uri: missing account errors"
+
 assert_ok Azure::valid_storage_account_name("mystore123")->{valid}, "valid_storage_account_name: legal"
 assert_eq Azure::valid_storage_account_name("My-Store")->{valid}, 0, "valid_storage_account_name: rejects upper+hyphen"
 

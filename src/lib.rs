@@ -937,6 +937,42 @@ fn op_parse_blob_uri(opts: Value) -> Result<Value> {
     }))
 }
 
+/// Build an Azure storage blob endpoint URL from parts — the inverse of
+/// `parse_blob_uri`. opts: `account` (required), `service` (default `blob`; one
+/// of blob/dfs/queue/table/file), `container` and `blob` (optional, in that
+/// order). Produces `https://<account>.<service>.core.windows.net/[container[/blob]]`.
+/// Pure.
+fn op_build_blob_uri(opts: Value) -> Result<Value> {
+    let account = opts
+        .get("account")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("missing account"))?;
+    let service = opts
+        .get("service")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("blob");
+    if !matches!(service, "blob" | "dfs" | "queue" | "table" | "file") {
+        return Err(anyhow!("unknown storage service `{service}`"));
+    }
+    let opt = |k: &str| {
+        opts.get(k)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    let mut uri = format!("https://{account}.{service}.core.windows.net");
+    if let Some(container) = opt("container") {
+        uri.push('/');
+        uri.push_str(container);
+        if let Some(blob) = opt("blob") {
+            uri.push('/');
+            uri.push_str(blob.trim_start_matches('/'));
+        }
+    }
+    Ok(json!({"uri": uri}))
+}
+
 // ── exports ──────────────────────────────────────────────────────────────────
 
 macro_rules! export {
@@ -1011,6 +1047,11 @@ pub extern "C" fn azure__parse_connection_string(args: *const c_char) -> *const 
 #[no_mangle]
 pub extern "C" fn azure__parse_blob_uri(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_parse_blob_uri(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__build_blob_uri(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_build_blob_uri(opts) })
 }
 
 #[no_mangle]
@@ -1235,6 +1276,43 @@ mod ffi_tests {
             "uri": "https://acct.bogus.core.windows.net/c"
         }))
         .is_err());
+    }
+
+    #[test]
+    fn build_blob_uri_inverts_parse_blob_uri() {
+        // Full account/container/nested-blob round-trips through parse.
+        let built = op_build_blob_uri(json!({
+            "account": "mystore", "container": "images", "blob": "2025/cat.png"
+        }))
+        .unwrap()["uri"]
+            .clone();
+        assert_eq!(
+            built,
+            json!("https://mystore.blob.core.windows.net/images/2025/cat.png")
+        );
+        let back = op_parse_blob_uri(json!({"uri": built})).unwrap();
+        assert_eq!(back["account"], json!("mystore"));
+        assert_eq!(back["container"], json!("images"));
+        assert_eq!(back["blob"], json!("2025/cat.png"));
+        // Service defaults to blob; dfs honored.
+        assert_eq!(
+            op_build_blob_uri(json!({"account": "lake", "service": "dfs", "container": "fs"}))
+                .unwrap()["uri"],
+            json!("https://lake.dfs.core.windows.net/fs")
+        );
+        // Account only → bare endpoint; blob ignored without a container.
+        assert_eq!(
+            op_build_blob_uri(json!({"account": "acct"})).unwrap()["uri"],
+            json!("https://acct.blob.core.windows.net")
+        );
+        assert_eq!(
+            op_build_blob_uri(json!({"account": "acct", "blob": "x"})).unwrap()["uri"],
+            json!("https://acct.blob.core.windows.net"),
+            "blob without container is dropped"
+        );
+        // Missing account and unknown service rejected.
+        assert!(op_build_blob_uri(json!({"container": "c"})).is_err());
+        assert!(op_build_blob_uri(json!({"account": "a", "service": "bogus"})).is_err());
     }
 
     #[test]

@@ -346,6 +346,13 @@ fn Azure::parse_blob_uri ($uri) {
     Azure::_decode("parse_blob_uri", azure__parse_blob_uri(to_json({ uri => $uri })))
 }
 
+## Build an Azure storage blob endpoint URL from parts — inverse of
+## parse_blob_uri. %opts: account (required), service (default "blob"; one of
+## blob/dfs/queue/table/file), container, blob. Returns the URL string.
+fn Azure::build_blob_uri (%opts) {
+    Azure::_decode("build_blob_uri", azure__build_blob_uri(to_json(\%opts)))->{uri}
+}
+
 ## Validate a storage account name (3-24 lowercase letters/numbers). Returns
 ## { name, valid, reason }.
 fn Azure::valid_storage_account_name ($name) {
