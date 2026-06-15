@@ -382,3 +382,10 @@ fn Azure::valid_container_name ($name) {
     Azure::_decode("valid_container_name",
         azure__valid_container_name(to_json({ name => $name })))
 }
+
+## Validate an Azure GUID (the 8-4-4-4-12 hex form used for subscription, tenant,
+## client, and object IDs). Hex is case-insensitive; braces are not accepted.
+## Returns a hashref { guid, valid, reason } (reason undef when valid).
+fn Azure::valid_guid ($guid) {
+    Azure::_decode("valid_guid", azure__valid_guid(to_json({ guid => $guid })))
+}

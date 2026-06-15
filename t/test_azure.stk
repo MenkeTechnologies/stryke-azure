@@ -156,4 +156,13 @@ val $cn = Azure::valid_container_name("a--b")
 assert_eq $cn->{valid}, 0, "valid_container_name: rejects consecutive hyphens"
 assert_match qr/consecutive/, $cn->{reason}, "valid_container_name: reason names the rule"
 
+# valid_guid: Azure GUID 8-4-4-4-12 hex form.
+assert_ok Azure::valid_guid("3f2504e0-4f89-41d3-9a0c-0305e82c3301")->{valid}, "valid_guid: canonical GUID"
+assert_ok Azure::valid_guid("3F2504E0-4F89-41D3-9A0C-0305E82C3301")->{valid}, "valid_guid: uppercase hex"
+assert_eq Azure::valid_guid("3f2504e0-4f89-41d3-9a0c-0305e82c330")->{valid}, 0, "valid_guid: wrong length fails"
+assert_eq Azure::valid_guid("3g2504e0-4f89-41d3-9a0c-0305e82c3301")->{valid}, 0, "valid_guid: non-hex fails"
+val $bg = Azure::valid_guid("{3f2504e0-4f89-41d3-9a0c-0305e82c3301}")
+assert_eq $bg->{valid}, 0,                "valid_guid: braces not accepted"
+assert_match qr/36 characters/, $bg->{reason}, "valid_guid: reason names the length"
+
 test_run

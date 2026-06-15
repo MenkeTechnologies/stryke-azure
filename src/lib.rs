@@ -987,6 +987,38 @@ fn op_valid_container_name(opts: Value) -> Result<Value> {
     Ok(json!({"name": name, "valid": reason.is_none(), "reason": reason}))
 }
 
+/// Validate an Azure GUID — the canonical `8-4-4-4-12` hex form Azure uses for
+/// subscription, tenant, client, and object IDs (e.g. the `subscription` that
+/// feeds `build_resource_id`). Hex is case-insensitive; braces/URN prefixes are
+/// not accepted. Returns `{guid, valid, reason}`. Pure.
+fn op_valid_guid(opts: Value) -> Result<Value> {
+    let guid = opts
+        .get("guid")
+        .or_else(|| opts.get("id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing guid"))?;
+    let groups: Vec<&str> = guid.split('-').collect();
+    let reason: Option<&str> = if guid.len() != 36 {
+        Some("must be 36 characters (8-4-4-4-12)")
+    } else if groups.len() != 5
+        || groups[0].len() != 8
+        || groups[1].len() != 4
+        || groups[2].len() != 4
+        || groups[3].len() != 4
+        || groups[4].len() != 12
+    {
+        Some("must be five hyphen-separated groups of 8-4-4-4-12")
+    } else if !groups
+        .iter()
+        .all(|g| g.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        Some("must contain only hexadecimal digits")
+    } else {
+        None
+    };
+    Ok(json!({"guid": guid, "valid": reason.is_none(), "reason": reason}))
+}
+
 /// Parse an Azure storage blob endpoint URL into its parts. Handles the
 /// `https://<account>.<service>.core.windows.net/<container>/<blob>` form, where
 /// `service` is `blob`, `dfs` (ADLS Gen2), `queue`, `table`, or `file`. Returns
@@ -1171,6 +1203,11 @@ pub extern "C" fn azure__valid_storage_account_name(args: *const c_char) -> *con
 #[no_mangle]
 pub extern "C" fn azure__valid_container_name(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_valid_container_name(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__valid_guid(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_valid_guid(opts) })
 }
 
 // ── tests ────────────────────────────────────────────────────────────────────
@@ -1520,5 +1557,36 @@ mod ffi_tests {
                 v["reason"]
             );
         }
+    }
+
+    #[test]
+    fn valid_guid_enforces_8_4_4_4_12_hex() {
+        let ok = |g: &str| {
+            op_valid_guid(json!({ "guid": g })).unwrap()["valid"]
+                .as_bool()
+                .unwrap()
+        };
+        // A real subscription-style GUID, and uppercase hex.
+        assert!(ok("3f2504e0-4f89-41d3-9a0c-0305e82c3301"));
+        assert!(
+            ok("3F2504E0-4F89-41D3-9A0C-0305E82C3301"),
+            "hex is case-insensitive"
+        );
+        // Wrong length, wrong grouping, non-hex, and braces all reject.
+        for (g, want) in [
+            ("3f2504e0-4f89-41d3-9a0c-0305e82c330", "36 characters"),
+            ("3f2504e04f8941d39a0c0305e82c3301xxxx", "8-4-4-4-12"),
+            ("3g2504e0-4f89-41d3-9a0c-0305e82c3301", "hexadecimal"),
+            ("{3f2504e0-4f89-41d3-9a0c-0305e82c3301}", "36 characters"),
+        ] {
+            let v = op_valid_guid(json!({ "guid": g })).unwrap();
+            assert_eq!(v["valid"], json!(false), "{g} should be invalid");
+            assert!(
+                v["reason"].as_str().unwrap().contains(want),
+                "{g}: reason `{}` should mention `{want}`",
+                v["reason"]
+            );
+        }
+        assert!(op_valid_guid(json!({})).is_err());
     }
 }

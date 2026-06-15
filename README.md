@@ -110,6 +110,7 @@ Azure::parse_blob_uri($uri)              # https://<acct>.<service>.core.windows
 Azure::build_blob_uri(%opts)             # account/service/container/blob → blob endpoint URL; inverse of parse_blob_uri
 Azure::valid_storage_account_name($name) # { name, valid, reason } — 3-24 lowercase alphanumerics
 Azure::valid_container_name($name)       # { name, valid, reason } — Blob container rules
+Azure::valid_guid($guid)                 # { guid, valid, reason } — 8-4-4-4-12 hex (subscription/tenant/client IDs)
 ```
 
 ## Packages
