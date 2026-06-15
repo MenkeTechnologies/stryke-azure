@@ -330,6 +330,13 @@ fn Azure::parse_resource_id ($id) {
     Azure::_decode("parse_resource_id", azure__parse_resource_id(to_json({ id => $id })))
 }
 
+## Assemble an Azure resource ID from parts, emitting canonical ARM casing.
+## %opts: subscription, resource_group, provider, types => [{ type, name }].
+## Inverse of parse_resource_id. Returns the id string.
+fn Azure::build_resource_id (%opts) {
+    Azure::_decode("build_resource_id", azure__build_resource_id(to_json(\%opts)))->{id}
+}
+
 ## Parse an Azure connection string "Key=Value;Key=Value…" into a hashref of
 ## { pairs => { Key => Value } }. Values keep everything after the first "=",
 ## so a base64 AccountKey survives.

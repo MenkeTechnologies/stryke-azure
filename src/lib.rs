@@ -819,6 +819,70 @@ fn op_parse_resource_id(opts: Value) -> Result<Value> {
     }))
 }
 
+/// Assemble an Azure resource ID from parts, emitting canonical ARM casing
+/// (`/subscriptions/…/resourceGroups/…/providers/…/type/name…`). opts:
+/// subscription, resource_group, provider (all optional strings), and types — an
+/// array of `{type, name?}` objects appended in order (a final entry may omit
+/// `name`, e.g. a list endpoint). `provider` is required when `types` is
+/// non-empty. Inverse of `parse_resource_id`. Returns `{id}`. Pure.
+fn op_build_resource_id(opts: Value) -> Result<Value> {
+    let mut id = String::new();
+    let push = |id: &mut String, seg: &str| {
+        id.push('/');
+        id.push_str(seg);
+    };
+    if let Some(sub) = opts
+        .get("subscription")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        push(&mut id, "subscriptions");
+        push(&mut id, sub);
+    }
+    if let Some(rg) = opts
+        .get("resource_group")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        push(&mut id, "resourceGroups");
+        push(&mut id, rg);
+    }
+    let types = opts.get("types").and_then(Value::as_array);
+    let has_types = types.is_some_and(|t| !t.is_empty());
+    let provider = opts
+        .get("provider")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    if has_types {
+        let provider =
+            provider.ok_or_else(|| anyhow!("provider required when types is non-empty"))?;
+        push(&mut id, "providers");
+        push(&mut id, provider);
+        for t in types.unwrap() {
+            let ty = t
+                .get("type")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow!("type entry missing `type`"))?;
+            push(&mut id, ty);
+            if let Some(name) = t
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            {
+                push(&mut id, name);
+            }
+        }
+    } else if let Some(provider) = provider {
+        push(&mut id, "providers");
+        push(&mut id, provider);
+    }
+    if id.is_empty() {
+        return Err(anyhow!("no resource id parts supplied"));
+    }
+    Ok(json!({ "id": id }))
+}
+
 /// Parse an Azure connection string `Key=Value;Key=Value…` into a map. The
 /// value keeps everything after the first `=`, so base64 `AccountKey` padding
 /// (`==`) survives. Pure.
@@ -1040,6 +1104,11 @@ pub extern "C" fn azure__parse_resource_id(args: *const c_char) -> *const c_char
 }
 
 #[no_mangle]
+pub extern "C" fn azure__build_resource_id(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_build_resource_id(opts) })
+}
+
+#[no_mangle]
 pub extern "C" fn azure__parse_connection_string(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_parse_connection_string(opts) })
 }
@@ -1226,6 +1295,45 @@ mod ffi_tests {
             "last pair is the resource"
         );
         assert_eq!(v["name"], json!("default"));
+    }
+
+    #[test]
+    fn build_resource_id_inverts_parse_resource_id() {
+        // Full path emits canonical ARM casing.
+        let id = op_build_resource_id(json!({
+            "subscription": "abc-123",
+            "resource_group": "my-rg",
+            "provider": "Microsoft.Storage",
+            "types": [{"type": "storageAccounts", "name": "mystore"}]
+        }))
+        .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            id,
+            "/subscriptions/abc-123/resourceGroups/my-rg/providers/Microsoft.Storage/storageAccounts/mystore"
+        );
+        // Round-trips through parse_resource_id, including a nested name-less tail.
+        let original = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/acct/blobServices/default";
+        let p = op_parse_resource_id(json!({ "id": original })).unwrap();
+        let rebuilt = op_build_resource_id(json!({
+            "subscription": p["subscription"],
+            "resource_group": p["resource_group"],
+            "provider": p["provider"],
+            "types": p["types"],
+        }))
+        .unwrap()["id"]
+            .clone();
+        assert_eq!(rebuilt, json!(original));
+        // Subscription-only id is valid (no provider/types).
+        assert_eq!(
+            op_build_resource_id(json!({"subscription": "s"})).unwrap()["id"],
+            json!("/subscriptions/s")
+        );
+        // types without a provider is an error; empty input is an error.
+        assert!(op_build_resource_id(json!({"types": [{"type": "x", "name": "y"}]})).is_err());
+        assert!(op_build_resource_id(json!({})).is_err());
     }
 
     #[test]

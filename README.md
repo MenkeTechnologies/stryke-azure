@@ -103,6 +103,7 @@ These open no client — credential-free string parsing/validation:
 
 ```stryke
 Azure::parse_resource_id($id)            # /subscriptions/.../providers/... → { subscription, resource_group, provider, types, resource_type, name }
+Azure::build_resource_id(%opts)          # { subscription, resource_group, provider, types } → resource ID (canonical ARM casing); inverse of parse_resource_id
 Azure::parse_connection_string($cs)      # Key=Value;... → { pairs => { Key => Value } } (base64 AccountKey survives)
 Azure::parse_blob_uri($uri)              # https://<acct>.<service>.core.windows.net/<container>/<blob> → { account, service, host, container, blob }
 Azure::build_blob_uri(%opts)             # account/service/container/blob → blob endpoint URL; inverse of parse_blob_uri

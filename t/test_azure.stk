@@ -117,6 +117,12 @@ assert_eq $rid->{provider},       "Microsoft.Storage", "parse_resource_id: provi
 assert_eq $rid->{resource_type},  "storageAccounts",   "parse_resource_id: type"
 assert_eq $rid->{name},           "mystore",           "parse_resource_id: name"
 
+# build_resource_id: inverse of parse_resource_id, canonical ARM casing.
+assert_eq Azure::build_resource_id(subscription => "abc-123", resource_group => "my-rg", provider => "Microsoft.Storage", types => [{ type => "storageAccounts", name => "mystore" }]), "/subscriptions/abc-123/resourceGroups/my-rg/providers/Microsoft.Storage/storageAccounts/mystore", "build_resource_id: full path"
+assert_eq Azure::build_resource_id(subscription => "s"), "/subscriptions/s", "build_resource_id: subscription only"
+assert_eq Azure::build_resource_id(subscription => $rid->{subscription}, resource_group => $rid->{resource_group}, provider => $rid->{provider}, types => $rid->{types}), "/subscriptions/abc-123/resourceGroups/my-rg/providers/Microsoft.Storage/storageAccounts/mystore", "build_resource_id: round-trips parse_resource_id"
+assert_dies fn { Azure::build_resource_id(types => [{ type => "x", name => "y" }]) }, "build_resource_id: types without provider errors"
+
 val $cs = Azure::parse_connection_string("DefaultEndpointsProtocol=https;AccountName=mystore;AccountKey=Zm9vYmF6==;EndpointSuffix=core.windows.net")
 assert_eq $cs->{pairs}{AccountName}, "mystore",        "parse_connection_string: account name"
 assert_eq $cs->{pairs}{AccountKey},  "Zm9vYmF6==",     "parse_connection_string: base64 key survives"
