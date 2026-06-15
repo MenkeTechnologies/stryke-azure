@@ -891,6 +891,52 @@ fn op_valid_container_name(opts: Value) -> Result<Value> {
     Ok(json!({"name": name, "valid": reason.is_none(), "reason": reason}))
 }
 
+/// Parse an Azure storage blob endpoint URL into its parts. Handles the
+/// `https://<account>.<service>.core.windows.net/<container>/<blob>` form, where
+/// `service` is `blob`, `dfs` (ADLS Gen2), `queue`, `table`, or `file`. Returns
+/// `{account, service, host, container, blob}` (container/blob null when the URL
+/// stops short). The `blob` keeps any nested path after the container. Pure.
+fn op_parse_blob_uri(opts: Value) -> Result<Value> {
+    let uri = opts
+        .get("uri")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing uri"))?;
+    let rest = uri
+        .strip_prefix("https://")
+        .or_else(|| uri.strip_prefix("http://"))
+        .ok_or_else(|| anyhow!("not an http(s) blob URL: {uri}"))?;
+    let (host, path) = match rest.split_once('/') {
+        Some((h, p)) => (h, p),
+        None => (rest, ""),
+    };
+    // Host is `<account>.<service>.core.windows.net`; account and service are the
+    // first two labels.
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 3 || labels[0].is_empty() {
+        return Err(anyhow!("not an Azure storage host: {host}"));
+    }
+    let account = labels[0];
+    let service = labels[1];
+    if !matches!(service, "blob" | "dfs" | "queue" | "table" | "file") {
+        return Err(anyhow!(
+            "unknown storage service `{service}` in host {host}"
+        ));
+    }
+    let (container, blob) = match path.split_once('/') {
+        Some((c, b)) if !b.is_empty() => (json!(c), json!(b)),
+        Some((c, _)) => (json!(c), Value::Null),
+        None if !path.is_empty() => (json!(path), Value::Null),
+        None => (Value::Null, Value::Null),
+    };
+    Ok(json!({
+        "account": account,
+        "service": service,
+        "host": host,
+        "container": container,
+        "blob": blob,
+    }))
+}
+
 // ── exports ──────────────────────────────────────────────────────────────────
 
 macro_rules! export {
@@ -960,6 +1006,11 @@ pub extern "C" fn azure__parse_resource_id(args: *const c_char) -> *const c_char
 #[no_mangle]
 pub extern "C" fn azure__parse_connection_string(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_parse_connection_string(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__parse_blob_uri(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_parse_blob_uri(opts) })
 }
 
 #[no_mangle]
@@ -1152,6 +1203,38 @@ mod ffi_tests {
         assert!(
             op_parse_connection_string(json!({"connection_string": "no-equals-here"})).is_err()
         );
+    }
+
+    #[test]
+    fn parse_blob_uri_splits_account_container_and_nested_blob() {
+        let v = op_parse_blob_uri(json!({
+            "uri": "https://mystore.blob.core.windows.net/images/2025/cat.png"
+        }))
+        .unwrap();
+        assert_eq!(v["account"], json!("mystore"));
+        assert_eq!(v["service"], json!("blob"));
+        assert_eq!(v["container"], json!("images"));
+        assert_eq!(v["blob"], json!("2025/cat.png"), "nested path kept in blob");
+        // ADLS Gen2 dfs endpoint, container only (no blob).
+        let dfs = op_parse_blob_uri(json!({
+            "uri": "https://lake.dfs.core.windows.net/fs"
+        }))
+        .unwrap();
+        assert_eq!(dfs["service"], json!("dfs"));
+        assert_eq!(dfs["container"], json!("fs"));
+        assert_eq!(dfs["blob"], Value::Null, "container-only URL has null blob");
+        // Account endpoint with no container.
+        let bare = op_parse_blob_uri(json!({
+            "uri": "https://acct.blob.core.windows.net/"
+        }))
+        .unwrap();
+        assert_eq!(bare["container"], Value::Null);
+        // Non-https and unknown service rejected.
+        assert!(op_parse_blob_uri(json!({"uri": "gs://x/y"})).is_err());
+        assert!(op_parse_blob_uri(json!({
+            "uri": "https://acct.bogus.core.windows.net/c"
+        }))
+        .is_err());
     }
 
     #[test]

@@ -104,6 +104,7 @@ These open no client — credential-free string parsing/validation:
 ```stryke
 Azure::parse_resource_id($id)            # /subscriptions/.../providers/... → { subscription, resource_group, provider, types, resource_type, name }
 Azure::parse_connection_string($cs)      # Key=Value;... → { pairs => { Key => Value } } (base64 AccountKey survives)
+Azure::parse_blob_uri($uri)              # https://<acct>.<service>.core.windows.net/<container>/<blob> → { account, service, host, container, blob }
 Azure::valid_storage_account_name($name) # { name, valid, reason } — 3-24 lowercase alphanumerics
 Azure::valid_container_name($name)       # { name, valid, reason } — Blob container rules
 ```

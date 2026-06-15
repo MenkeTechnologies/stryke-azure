@@ -122,4 +122,11 @@ assert_ok exists &Azure::Secrets::backup, "Azure::Secrets::backup exists"
 assert_ok exists &Azure::Keys::encrypt, "Azure::Keys::encrypt exists"
 assert_ok exists &Azure::Keys::decrypt, "Azure::Keys::decrypt exists"
 
+# ── pure parse/validate helpers ──
+assert_ok exists &Azure::parse_resource_id, "Azure::parse_resource_id exists"
+assert_ok exists &Azure::parse_connection_string, "Azure::parse_connection_string exists"
+assert_ok exists &Azure::parse_blob_uri, "Azure::parse_blob_uri exists"
+assert_ok exists &Azure::valid_storage_account_name, "Azure::valid_storage_account_name exists"
+assert_ok exists &Azure::valid_container_name, "Azure::valid_container_name exists"
+
 test_run

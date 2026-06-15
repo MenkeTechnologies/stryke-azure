@@ -338,6 +338,14 @@ fn Azure::parse_connection_string ($cs) {
         azure__parse_connection_string(to_json({ connection_string => $cs })))
 }
 
+## Parse an Azure storage blob endpoint URL
+## "https://<account>.<service>.core.windows.net/<container>/<blob>" into a
+## hashref { account, service, host, container, blob }. service is one of blob,
+## dfs, queue, table, file. container/blob are undef when the URL stops short.
+fn Azure::parse_blob_uri ($uri) {
+    Azure::_decode("parse_blob_uri", azure__parse_blob_uri(to_json({ uri => $uri })))
+}
+
 ## Validate a storage account name (3-24 lowercase letters/numbers). Returns
 ## { name, valid, reason }.
 fn Azure::valid_storage_account_name ($name) {

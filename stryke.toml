@@ -1,6 +1,6 @@
 [package]
 name = "stryke-azure"
-version = "0.2.0"
+version = "0.3.0"
 description = "Azure client (Blob Storage, Storage Queues, Cosmos DB, Key Vault Secrets, Entra identity) for stryke. cdylib loaded in-process — persistent tokio runtime + shared Entra credential."
 authors = ["MenkeTechnologies"]
 license = "MIT"
@@ -51,6 +51,7 @@ exports = [
     "azure__keys_decrypt",
     "azure__parse_resource_id",
     "azure__parse_connection_string",
+    "azure__parse_blob_uri",
     "azure__valid_storage_account_name",
     "azure__valid_container_name",
 ]

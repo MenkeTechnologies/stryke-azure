@@ -121,6 +121,16 @@ val $cs = Azure::parse_connection_string("DefaultEndpointsProtocol=https;Account
 assert_eq $cs->{pairs}{AccountName}, "mystore",        "parse_connection_string: account name"
 assert_eq $cs->{pairs}{AccountKey},  "Zm9vYmF6==",     "parse_connection_string: base64 key survives"
 
+# parse_blob_uri: account/service/container/nested-blob from the endpoint URL.
+val $bu = Azure::parse_blob_uri("https://mystore.blob.core.windows.net/images/2025/cat.png")
+assert_eq $bu->{account},   "mystore",      "parse_blob_uri: account"
+assert_eq $bu->{service},   "blob",         "parse_blob_uri: service"
+assert_eq $bu->{container}, "images",       "parse_blob_uri: container"
+assert_eq $bu->{blob},      "2025/cat.png", "parse_blob_uri: nested blob path kept"
+val $dfs = Azure::parse_blob_uri("https://lake.dfs.core.windows.net/fs")
+assert_eq $dfs->{service}, "dfs",            "parse_blob_uri: ADLS Gen2 dfs service"
+assert_ok !defined($dfs->{blob}),            "parse_blob_uri: container-only URL has undef blob"
+
 assert_ok Azure::valid_storage_account_name("mystore123")->{valid}, "valid_storage_account_name: legal"
 assert_eq Azure::valid_storage_account_name("My-Store")->{valid}, 0, "valid_storage_account_name: rejects upper+hyphen"
 
