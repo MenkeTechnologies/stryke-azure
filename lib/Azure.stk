@@ -345,6 +345,15 @@ fn Azure::parse_connection_string ($cs) {
         azure__parse_connection_string(to_json({ connection_string => $cs })))
 }
 
+## Assemble an Azure connection string "Key=Value;…" from a %pairs hashref —
+## inverse of parse_connection_string. Keys keep their order so a parsed string
+## rebuilds byte-identically; values may contain "=" but not ";". Returns the
+## connection string.
+fn Azure::build_connection_string (%pairs) {
+    Azure::_decode("build_connection_string",
+        azure__build_connection_string(to_json({ pairs => \%pairs })))->{connection_string}
+}
+
 ## Parse an Azure storage blob endpoint URL
 ## "https://<account>.<service>.core.windows.net/<container>/<blob>" into a
 ## hashref { account, service, host, container, blob }. service is one of blob,

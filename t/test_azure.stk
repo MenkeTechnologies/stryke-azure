@@ -127,6 +127,11 @@ val $cs = Azure::parse_connection_string("DefaultEndpointsProtocol=https;Account
 assert_eq $cs->{pairs}{AccountName}, "mystore",        "parse_connection_string: account name"
 assert_eq $cs->{pairs}{AccountKey},  "Zm9vYmF6==",     "parse_connection_string: base64 key survives"
 
+# build_connection_string: inverse of parse_connection_string (byte-identical round-trip).
+val $built = Azure::build_connection_string(%{ $cs->{pairs} })
+assert_eq $built, "DefaultEndpointsProtocol=https;AccountName=mystore;AccountKey=Zm9vYmF6==;EndpointSuffix=core.windows.net", "build_connection_string: round-trips parse byte-identically (order + base64 ==)"
+assert_dies fn { Azure::build_connection_string(K => "a;b") }, "build_connection_string: rejects ';' in a value"
+
 # parse_blob_uri: account/service/container/nested-blob from the endpoint URL.
 val $bu = Azure::parse_blob_uri("https://mystore.blob.core.windows.net/images/2025/cat.png")
 assert_eq $bu->{account},   "mystore",      "parse_blob_uri: account"

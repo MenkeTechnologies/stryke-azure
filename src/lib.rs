@@ -907,6 +907,38 @@ fn op_parse_connection_string(opts: Value) -> Result<Value> {
     Ok(json!({"pairs": Value::Object(map)}))
 }
 
+/// Assemble an Azure connection string `Key=Value;Key=Value…` from a `pairs`
+/// object — the inverse of `parse_connection_string`. Keys keep their given
+/// order (serde preserves insertion order), so a parsed string rebuilds
+/// byte-identically. Keys must not contain `=` or `;`; values may contain `=`
+/// (base64 `AccountKey` padding) but not the `;` delimiter. Returns
+/// `{connection_string}`. Pure.
+fn op_build_connection_string(opts: Value) -> Result<Value> {
+    let pairs = opts
+        .get("pairs")
+        .and_then(Value::as_object)
+        .ok_or_else(|| anyhow!("missing pairs (object)"))?;
+    if pairs.is_empty() {
+        return Err(anyhow!("pairs must not be empty"));
+    }
+    let mut parts = Vec::with_capacity(pairs.len());
+    for (k, v) in pairs {
+        if k.is_empty() || k.contains('=') || k.contains(';') {
+            return Err(anyhow!("invalid key `{k}` (non-empty, no `=` or `;`)"));
+        }
+        let val = match v {
+            Value::String(s) => s.clone(),
+            Value::Number(_) | Value::Bool(_) => v.to_string(),
+            _ => return Err(anyhow!("value for `{k}` must be a string, number, or bool")),
+        };
+        if val.contains(';') {
+            return Err(anyhow!("value for `{k}` must not contain `;`"));
+        }
+        parts.push(format!("{k}={val}"));
+    }
+    Ok(json!({ "connection_string": parts.join(";") }))
+}
+
 /// Validate an Azure storage account name: 3–24 chars, lowercase letters and
 /// numbers only. Returns `{valid, reason}`. Pure.
 fn op_valid_storage_account_name(opts: Value) -> Result<Value> {
@@ -1111,6 +1143,11 @@ pub extern "C" fn azure__build_resource_id(args: *const c_char) -> *const c_char
 #[no_mangle]
 pub extern "C" fn azure__parse_connection_string(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_parse_connection_string(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__build_connection_string(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_build_connection_string(opts) })
 }
 
 #[no_mangle]
@@ -1352,6 +1389,30 @@ mod ffi_tests {
         assert!(
             op_parse_connection_string(json!({"connection_string": "no-equals-here"})).is_err()
         );
+    }
+
+    #[test]
+    fn build_connection_string_inverts_parse_connection_string() {
+        // Round-trips byte-identically thanks to preserve_order — base64 `==` and
+        // key order both survive.
+        let cs = "DefaultEndpointsProtocol=https;AccountName=mystore;AccountKey=Zm9vYmFyYmF6==;EndpointSuffix=core.windows.net";
+        let parsed = op_parse_connection_string(json!({ "connection_string": cs })).unwrap();
+        assert_eq!(
+            op_build_connection_string(json!({ "pairs": parsed["pairs"] })).unwrap()
+                ["connection_string"],
+            json!(cs),
+            "parse → build is byte-identical"
+        );
+        // Number / bool values stringify without JSON quoting.
+        assert_eq!(
+            op_build_connection_string(json!({"pairs": {"Port": 443, "Secure": true}})).unwrap()
+                ["connection_string"],
+            json!("Port=443;Secure=true")
+        );
+        // Reject `;` in a value, `=`/`;` in a key, and an empty map.
+        assert!(op_build_connection_string(json!({"pairs": {"K": "a;b"}})).is_err());
+        assert!(op_build_connection_string(json!({"pairs": {"bad=key": "v"}})).is_err());
+        assert!(op_build_connection_string(json!({"pairs": {}})).is_err());
     }
 
     #[test]
