@@ -987,6 +987,30 @@ fn op_valid_container_name(opts: Value) -> Result<Value> {
     Ok(json!({"name": name, "valid": reason.is_none(), "reason": reason}))
 }
 
+/// Validate an Azure Table Storage table name per the documented grammar
+/// `^[A-Za-z][A-Za-z0-9]{2,62}$`: 3–63 characters, alphanumeric only (no hyphens,
+/// unlike a container), must begin with a letter (not a digit, unlike a storage
+/// account), case-insensitive; `tables` is reserved. Returns `{name, valid,
+/// reason}`. Pure.
+fn op_valid_table_name(opts: Value) -> Result<Value> {
+    let name = opts
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing name"))?;
+    let reason: Option<&str> = if name.len() < 3 || name.len() > 63 {
+        Some("must be 3-63 characters")
+    } else if !name.as_bytes()[0].is_ascii_alphabetic() {
+        Some("must begin with a letter")
+    } else if !name.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        Some("only alphanumeric characters (no hyphens or underscores)")
+    } else if name.eq_ignore_ascii_case("tables") {
+        Some("`tables` is a reserved table name")
+    } else {
+        None
+    };
+    Ok(json!({"name": name, "valid": reason.is_none(), "reason": reason}))
+}
+
 /// Validate an Azure GUID — the canonical `8-4-4-4-12` hex form Azure uses for
 /// subscription, tenant, client, and object IDs (e.g. the `subscription` that
 /// feeds `build_resource_id`). Hex is case-insensitive; braces/URN prefixes are
@@ -1302,6 +1326,11 @@ pub extern "C" fn azure__valid_storage_account_name(args: *const c_char) -> *con
 #[no_mangle]
 pub extern "C" fn azure__valid_container_name(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_valid_container_name(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__valid_table_name(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_valid_table_name(opts) })
 }
 
 #[no_mangle]
@@ -1696,6 +1725,41 @@ mod ffi_tests {
                 v["reason"]
             );
         }
+    }
+
+    #[test]
+    fn valid_table_name_matches_documented_regex() {
+        let chk = |n: &str| op_valid_table_name(json!({ "name": n })).unwrap();
+        // Alphanumeric, letter-start, case preserved; min/max boundaries.
+        for ok in [
+            "MyTable",
+            "abc",
+            "Logs2025",
+            &format!("a{}", "b".repeat(62)),
+        ] {
+            assert_eq!(chk(ok)["valid"], json!(true), "`{ok}` should be valid");
+        }
+        // Invalid by each rule, with a reason naming it.
+        for (name, want) in [
+            ("ab", "3-63"),
+            (&"a".repeat(64), "3-63"),
+            ("1table", "begin with a letter"),
+            ("my-table", "alphanumeric"),
+            ("my_table", "alphanumeric"),
+            ("tables", "reserved"),
+            ("TABLES", "reserved"),
+        ] {
+            let v = chk(name);
+            assert_eq!(v["valid"], json!(false), "`{name}` should be invalid");
+            assert!(
+                v["reason"].as_str().unwrap().contains(want),
+                "`{name}`: reason `{}` should mention `{want}`",
+                v["reason"]
+            );
+        }
+        // A name that merely contains "tables" is fine.
+        assert_eq!(chk("tablesx")["valid"], json!(true));
+        assert!(op_valid_table_name(json!({})).is_err());
     }
 
     #[test]

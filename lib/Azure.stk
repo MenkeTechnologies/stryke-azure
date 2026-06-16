@@ -392,6 +392,14 @@ fn Azure::valid_container_name ($name) {
         azure__valid_container_name(to_json({ name => $name })))
 }
 
+## Validate an Azure Table Storage table name (^[A-Za-z][A-Za-z0-9]{2,62}$):
+## 3-63 alphanumeric chars, must begin with a letter, case-insensitive, "tables"
+## reserved. Returns { name, valid, reason }.
+fn Azure::valid_table_name ($name) {
+    Azure::_decode("valid_table_name",
+        azure__valid_table_name(to_json({ name => $name })))
+}
+
 ## Validate an Azure GUID (the 8-4-4-4-12 hex form used for subscription, tenant,
 ## client, and object IDs). Hex is case-insensitive; braces are not accepted.
 ## Returns a hashref { guid, valid, reason } (reason undef when valid).
