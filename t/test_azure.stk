@@ -132,6 +132,14 @@ val $built = Azure::build_connection_string(%{ $cs->{pairs} })
 assert_eq $built, "DefaultEndpointsProtocol=https;AccountName=mystore;AccountKey=Zm9vYmF6==;EndpointSuffix=core.windows.net", "build_connection_string: round-trips parse byte-identically (order + base64 ==)"
 assert_dies fn { Azure::build_connection_string(K => "a;b") }, "build_connection_string: rejects ';' in a value"
 
+# redact_connection_string: mask AccountKey/SharedAccessSignature for safe logging.
+val $rd = Azure::redact_connection_string("DefaultEndpointsProtocol=https;AccountName=mystore;AccountKey=Zm9vYmF6==;EndpointSuffix=core.windows.net")
+assert_eq $rd->{redacted}, "DefaultEndpointsProtocol=https;AccountName=mystore;AccountKey=***;EndpointSuffix=core.windows.net", "redact_connection_string: masks only the AccountKey value"
+assert_eq $rd->{masked_count}, 1, "redact_connection_string: one secret masked"
+val $rs = Azure::redact_connection_string("BlobEndpoint=https://x.blob.core.windows.net/;sharedaccesssignature=sv=2021", mask => "REDACTED")
+assert_eq $rs->{redacted}, "BlobEndpoint=https://x.blob.core.windows.net/;sharedaccesssignature=REDACTED", "redact_connection_string: masks SAS (case-insensitive) with a custom mask"
+assert_eq Azure::redact_connection_string("AccountName=x;EndpointSuffix=core.windows.net")->{masked_count}, 0, "redact_connection_string: no secrets → nothing masked"
+
 # parse_blob_uri: account/service/container/nested-blob from the endpoint URL.
 val $bu = Azure::parse_blob_uri("https://mystore.blob.core.windows.net/images/2025/cat.png")
 assert_eq $bu->{account},   "mystore",      "parse_blob_uri: account"

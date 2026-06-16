@@ -939,6 +939,38 @@ fn op_build_connection_string(opts: Value) -> Result<Value> {
     Ok(json!({ "connection_string": parts.join(";") }))
 }
 
+/// Mask the secret fields of an Azure connection string so it can be safely
+/// logged — the value of every `AccountKey` and `SharedAccessSignature` pair
+/// (key match is case-insensitive) becomes a mask (`***` by default), with all
+/// other pairs preserved. opts: `connection_string` (or `dsn`) required, optional
+/// `mask`. Returns `{redacted, masked_count}`. Pure.
+fn op_redact_connection_string(opts: Value) -> Result<Value> {
+    let cs = opts
+        .get("connection_string")
+        .or_else(|| opts.get("dsn"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing connection_string"))?;
+    let mask = opts.get("mask").and_then(Value::as_str).unwrap_or("***");
+    let mut parts = Vec::new();
+    let mut masked = 0usize;
+    for pair in cs.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+        let (k, _) = pair
+            .split_once('=')
+            .ok_or_else(|| anyhow!("malformed pair (no `=`): {pair}"))?;
+        let key = k.trim();
+        if matches!(
+            key.to_ascii_lowercase().as_str(),
+            "accountkey" | "sharedaccesssignature"
+        ) {
+            parts.push(format!("{key}={mask}"));
+            masked += 1;
+        } else {
+            parts.push(pair.to_string());
+        }
+    }
+    Ok(json!({ "redacted": parts.join(";"), "masked_count": masked }))
+}
+
 /// Validate an Azure storage account name: 3–24 chars, lowercase letters and
 /// numbers only. Returns `{valid, reason}`. Pure.
 fn op_valid_storage_account_name(opts: Value) -> Result<Value> {
@@ -1450,6 +1482,14 @@ pub extern "C" fn azure__build_connection_string(args: *const c_char) -> *const 
 }
 
 #[no_mangle]
+pub extern "C" fn azure__redact_connection_string(args: *const c_char) -> *const c_char {
+    ffi_call_async(
+        args,
+        |opts| async move { op_redact_connection_string(opts) },
+    )
+}
+
+#[no_mangle]
 pub extern "C" fn azure__parse_blob_uri(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_parse_blob_uri(opts) })
 }
@@ -1752,6 +1792,43 @@ mod ffi_tests {
         assert!(op_build_connection_string(json!({"pairs": {"K": "a;b"}})).is_err());
         assert!(op_build_connection_string(json!({"pairs": {"bad=key": "v"}})).is_err());
         assert!(op_build_connection_string(json!({"pairs": {}})).is_err());
+    }
+
+    #[test]
+    fn redact_connection_string_masks_only_secret_fields() {
+        let cs = "DefaultEndpointsProtocol=https;AccountName=mystore;AccountKey=Zm9vYmFyYmF6==;EndpointSuffix=core.windows.net";
+        let v = op_redact_connection_string(json!({ "connection_string": cs })).unwrap();
+        assert_eq!(
+            v["redacted"],
+            json!("DefaultEndpointsProtocol=https;AccountName=mystore;AccountKey=***;EndpointSuffix=core.windows.net"),
+            "only the AccountKey value is masked; everything else is preserved"
+        );
+        assert_eq!(v["masked_count"], json!(1));
+        // SharedAccessSignature is also a secret (key match is case-insensitive),
+        // and a custom mask is honored.
+        let sas = op_redact_connection_string(json!({
+            "connection_string": "BlobEndpoint=https://x.blob.core.windows.net/;sharedaccesssignature=sv=2021&sig=abc",
+            "mask": "REDACTED",
+        }))
+        .unwrap();
+        assert_eq!(
+            sas["redacted"],
+            json!("BlobEndpoint=https://x.blob.core.windows.net/;sharedaccesssignature=REDACTED")
+        );
+        assert_eq!(sas["masked_count"], json!(1));
+        // A string with no secrets is unchanged (masked_count 0).
+        let none = op_redact_connection_string(
+            json!({"connection_string": "AccountName=x;EndpointSuffix=core.windows.net"}),
+        )
+        .unwrap();
+        assert_eq!(none["masked_count"], json!(0));
+        // The `dsn` alias works; a malformed pair and a missing arg error.
+        assert_eq!(
+            op_redact_connection_string(json!({"dsn": "AccountKey=secret"})).unwrap()["redacted"],
+            json!("AccountKey=***")
+        );
+        assert!(op_redact_connection_string(json!({"connection_string": "no-equals"})).is_err());
+        assert!(op_redact_connection_string(json!({})).is_err());
     }
 
     #[test]
