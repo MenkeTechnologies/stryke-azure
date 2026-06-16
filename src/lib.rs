@@ -1102,6 +1102,31 @@ fn op_valid_blob_name(opts: Value) -> Result<Value> {
     }))
 }
 
+/// Validate an Azure Key Vault secret name per the Key Vault object-identifier
+/// rules: 1 to 127 characters, containing only alphanumeric characters and
+/// hyphens (`^[0-9a-zA-Z-]+$`) — no underscores or dots, unlike a blob name. (The
+/// "start with a letter" guidance is a best-practice recommendation, not a
+/// service constraint, so it is not enforced.) The Key Vault member of the
+/// `valid_*` family. opts: `name` (or `secret_name`, required). Returns `{name,
+/// valid, reason}`. Pure.
+fn op_valid_keyvault_secret_name(opts: Value) -> Result<Value> {
+    let name = opts
+        .get("name")
+        .or_else(|| opts.get("secret_name"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing name"))?;
+    let reason: Option<&str> = if name.is_empty() {
+        Some("must not be empty")
+    } else if name.chars().count() > 127 {
+        Some("must be at most 127 characters")
+    } else if !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        Some("only alphanumeric characters and hyphens")
+    } else {
+        None
+    };
+    Ok(json!({"name": name, "valid": reason.is_none(), "reason": reason}))
+}
+
 /// Validate an Azure Cosmos DB resource ID — a database or container name —
 /// against the documented limits
 /// (learn.microsoft.com/azure/cosmos-db/concepts-limits): 1–255 characters, and
@@ -1561,6 +1586,14 @@ pub extern "C" fn azure__valid_container_name(args: *const c_char) -> *const c_c
 #[no_mangle]
 pub extern "C" fn azure__valid_blob_name(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_valid_blob_name(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__valid_keyvault_secret_name(args: *const c_char) -> *const c_char {
+    ffi_call_async(
+        args,
+        |opts| async move { op_valid_keyvault_secret_name(opts) },
+    )
 }
 
 #[no_mangle]
@@ -2208,6 +2241,34 @@ mod ffi_tests {
             json!(true)
         );
         assert!(op_valid_blob_name(json!({})).is_err());
+    }
+
+    #[test]
+    fn valid_keyvault_secret_name_enforces_object_id_rules() {
+        let chk = |n: &str| op_valid_keyvault_secret_name(json!({ "name": n })).unwrap();
+        // Valid: alphanumeric + hyphens, any case, 1-127 chars.
+        assert_eq!(chk("db-Password-1")["valid"], json!(true));
+        assert_eq!(chk("A")["valid"], json!(true));
+        assert_eq!(
+            chk(&"a".repeat(127))["valid"],
+            json!(true),
+            "127 is the max"
+        );
+        // A leading digit is allowed (the start-letter guidance is best-practice only).
+        assert_eq!(chk("1secret")["valid"], json!(true));
+        // Too long / empty / disallowed characters (underscore, dot, slash, space).
+        assert_eq!(chk(&"a".repeat(128))["valid"], json!(false));
+        assert_eq!(chk("")["valid"], json!(false));
+        for bad in ["under_score", "dot.name", "slash/name", "has space"] {
+            assert_eq!(chk(bad)["valid"], json!(false), "`{bad}` should be invalid");
+        }
+        // The reason is populated; `secret_name` alias; missing arg errors.
+        assert!(chk("under_score")["reason"].is_string());
+        assert_eq!(
+            op_valid_keyvault_secret_name(json!({"secret_name": "api-key"})).unwrap()["valid"],
+            json!(true)
+        );
+        assert!(op_valid_keyvault_secret_name(json!({})).is_err());
     }
 
     #[test]

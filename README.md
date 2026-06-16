@@ -114,6 +114,7 @@ Azure::parse_storage_endpoint($endpoint) # inverse: host/URL → { endpoint, acc
 Azure::valid_storage_account_name($name) # { name, valid, reason } — 3-24 lowercase alphanumerics
 Azure::valid_container_name($name)       # { name, valid, reason } — Blob container rules
 Azure::valid_blob_name($name)            # { name, valid, reason, characters, segments } — Blob name: 1-1024 chars, ≤254 path segments, no trailing dot/slash
+Azure::valid_keyvault_secret_name($name) # { name, valid, reason } — Key Vault secret name: 1-127 chars, alphanumeric + hyphens only
 Azure::valid_queue_name($name)           # { name, valid, reason } — Queue rules (same DNS-label grammar as a container)
 Azure::valid_table_name($name)           # { name, valid, reason } — Table name ^[A-Za-z][A-Za-z0-9]{2,62}$, "tables" reserved
 Azure::valid_cosmos_id($id)              # { id, valid, reason } — Cosmos DB database/container id: ≤255 chars, no / or \

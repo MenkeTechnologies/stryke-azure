@@ -420,6 +420,15 @@ fn Azure::valid_blob_name ($name) {
         azure__valid_blob_name(to_json({ name => $name })))
 }
 
+## Validate an Azure Key Vault secret name per the Key Vault object-identifier
+## rules: 1-127 characters of alphanumeric characters and hyphens only (no
+## underscores or dots). The Key Vault member of the valid_* family. Returns a
+## hashref { name, valid, reason } (reason undef when valid).
+fn Azure::valid_keyvault_secret_name ($name) {
+    Azure::_decode("valid_keyvault_secret_name",
+        azure__valid_keyvault_secret_name(to_json({ name => $name })))
+}
+
 ## Validate an Azure Storage queue name: 3-63 chars of lowercase letters,
 ## numbers and hyphens, starting alphanumeric, no consecutive/trailing hyphens
 ## (same DNS-label grammar as a container). Returns { name, valid, reason }.

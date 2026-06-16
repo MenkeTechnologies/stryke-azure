@@ -194,6 +194,15 @@ assert_eq Azure::valid_blob_name("report/")->{valid}, 0, "valid_blob_name: rejec
 assert_eq Azure::valid_blob_name("report.")->{valid}, 0, "valid_blob_name: rejects a trailing dot"
 assert_match qr/254/, Azure::valid_blob_name("a/" x 254 . "b")->{reason}, "valid_blob_name: rejects over 254 segments"
 
+# valid_keyvault_secret_name: Key Vault object-id rules (1-127 chars, alphanumeric + hyphens).
+assert_ok Azure::valid_keyvault_secret_name("db-Password-1")->{valid}, "valid_keyvault_secret_name: alphanumeric + hyphens"
+assert_ok Azure::valid_keyvault_secret_name("1secret")->{valid},      "valid_keyvault_secret_name: leading digit allowed (start-letter is best-practice only)"
+assert_eq Azure::valid_keyvault_secret_name("under_score")->{valid}, 0, "valid_keyvault_secret_name: underscore rejected"
+assert_eq Azure::valid_keyvault_secret_name("dot.name")->{valid}, 0,    "valid_keyvault_secret_name: dot rejected"
+assert_eq Azure::valid_keyvault_secret_name("")->{valid}, 0,            "valid_keyvault_secret_name: empty rejected"
+assert_eq Azure::valid_keyvault_secret_name("a" x 128)->{valid}, 0,     "valid_keyvault_secret_name: over 127 chars rejected"
+assert_dies fn { Azure::valid_keyvault_secret_name() }, "valid_keyvault_secret_name: dies on missing name"
+
 # valid_queue_name: same DNS-label grammar as a container.
 assert_ok Azure::valid_queue_name("order-events")->{valid}, "valid_queue_name: legal"
 val $qn = Azure::valid_queue_name("Bad_Queue")
