@@ -148,6 +148,13 @@ assert_eq Azure::build_blob_uri(account => "lake", service => "dfs", container =
 assert_eq Azure::build_blob_uri(account => "acct"), "https://acct.blob.core.windows.net", "build_blob_uri: account-only endpoint"
 assert_dies fn { Azure::build_blob_uri(container => "c") }, "build_blob_uri: missing account errors"
 
+# storage_endpoint: service endpoint with sovereign-cloud suffixes.
+assert_eq Azure::storage_endpoint(account => "mystore")->{endpoint}, "mystore.blob.core.windows.net", "storage_endpoint: public default"
+assert_eq Azure::storage_endpoint(account => "acct", service => "queue")->{endpoint}, "acct.queue.core.windows.net", "storage_endpoint: per-service"
+assert_eq Azure::storage_endpoint(account => "acct", cloud => "china")->{endpoint}, "acct.blob.core.chinacloudapi.cn", "storage_endpoint: China suffix"
+assert_eq Azure::storage_endpoint(account => "acct", service => "table", cloud => "usgov")->{endpoint}, "acct.table.core.usgovcloudapi.net", "storage_endpoint: US Gov suffix"
+assert_dies fn { Azure::storage_endpoint(account => "a", cloud => "mars") }, "storage_endpoint: rejects an unknown cloud"
+
 assert_ok Azure::valid_storage_account_name("mystore123")->{valid}, "valid_storage_account_name: legal"
 assert_eq Azure::valid_storage_account_name("My-Store")->{valid}, 0, "valid_storage_account_name: rejects upper+hyphen"
 

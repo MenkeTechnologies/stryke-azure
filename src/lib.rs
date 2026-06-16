@@ -1024,6 +1024,24 @@ fn op_valid_guid(opts: Value) -> Result<Value> {
 /// `service` is `blob`, `dfs` (ADLS Gen2), `queue`, `table`, or `file`. Returns
 /// `{account, service, host, container, blob}` (container/blob null when the URL
 /// stops short). The `blob` keeps any nested path after the container. Pure.
+/// The Azure storage services that share the `<account>.<service>.<suffix>` host
+/// shape. Single source of truth for parse/build_blob_uri and storage_endpoint.
+fn is_storage_service(s: &str) -> bool {
+    matches!(s, "blob" | "dfs" | "queue" | "table" | "file")
+}
+
+/// The core storage DNS suffix for an Azure cloud (Microsoft "independent
+/// clouds"): public → core.windows.net, china → core.chinacloudapi.cn, usgov →
+/// core.usgovcloudapi.net.
+fn storage_suffix_of(cloud: &str) -> Option<&'static str> {
+    match cloud {
+        "public" | "azure" | "azurecloud" => Some("core.windows.net"),
+        "china" | "azurechina" | "azurechinacloud" => Some("core.chinacloudapi.cn"),
+        "usgov" | "usgovernment" | "azureusgovernment" => Some("core.usgovcloudapi.net"),
+        _ => None,
+    }
+}
+
 fn op_parse_blob_uri(opts: Value) -> Result<Value> {
     let uri = opts
         .get("uri")
@@ -1045,7 +1063,7 @@ fn op_parse_blob_uri(opts: Value) -> Result<Value> {
     }
     let account = labels[0];
     let service = labels[1];
-    if !matches!(service, "blob" | "dfs" | "queue" | "table" | "file") {
+    if !is_storage_service(service) {
         return Err(anyhow!(
             "unknown storage service `{service}` in host {host}"
         ));
@@ -1081,7 +1099,7 @@ fn op_build_blob_uri(opts: Value) -> Result<Value> {
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .unwrap_or("blob");
-    if !matches!(service, "blob" | "dfs" | "queue" | "table" | "file") {
+    if !is_storage_service(service) {
         return Err(anyhow!("unknown storage service `{service}`"));
     }
     let opt = |k: &str| {
@@ -1099,6 +1117,45 @@ fn op_build_blob_uri(opts: Value) -> Result<Value> {
         }
     }
     Ok(json!({"uri": uri}))
+}
+
+/// Build an Azure storage service endpoint `<account>.<service>.<suffix>` with
+/// sovereign-cloud awareness — what `build_blob_uri` (hardwired to public
+/// `core.windows.net`) can't reach. opts: `account` (required), `service`
+/// (default `blob`; blob/dfs/queue/table/file), `cloud` (default `public`;
+/// public/china/usgov). Returns `{account, service, cloud, suffix, endpoint,
+/// url}`. Pure.
+fn op_storage_endpoint(opts: Value) -> Result<Value> {
+    let account = opts
+        .get("account")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("missing account"))?;
+    let service = opts
+        .get("service")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("blob");
+    if !is_storage_service(service) {
+        return Err(anyhow!("unknown storage service `{service}`"));
+    }
+    let cloud = opts
+        .get("cloud")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("public")
+        .to_ascii_lowercase();
+    let suffix = storage_suffix_of(&cloud)
+        .ok_or_else(|| anyhow!("unknown cloud `{cloud}` (public/china/usgov)"))?;
+    let endpoint = format!("{account}.{service}.{suffix}");
+    Ok(json!({
+        "account": account,
+        "service": service,
+        "cloud": cloud,
+        "suffix": suffix,
+        "endpoint": endpoint,
+        "url": format!("https://{endpoint}"),
+    }))
 }
 
 // ── exports ──────────────────────────────────────────────────────────────────
@@ -1190,6 +1247,11 @@ pub extern "C" fn azure__parse_blob_uri(args: *const c_char) -> *const c_char {
 #[no_mangle]
 pub extern "C" fn azure__build_blob_uri(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_build_blob_uri(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__storage_endpoint(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_storage_endpoint(opts) })
 }
 
 #[no_mangle]
@@ -1519,6 +1581,41 @@ mod ffi_tests {
         // Missing account and unknown service rejected.
         assert!(op_build_blob_uri(json!({"container": "c"})).is_err());
         assert!(op_build_blob_uri(json!({"account": "a", "service": "bogus"})).is_err());
+    }
+
+    #[test]
+    fn storage_endpoint_supports_sovereign_clouds() {
+        // Public cloud default.
+        let v = op_storage_endpoint(json!({"account": "mystore"})).unwrap();
+        assert_eq!(v["endpoint"], json!("mystore.blob.core.windows.net"));
+        assert_eq!(v["url"], json!("https://mystore.blob.core.windows.net"));
+        assert_eq!(v["cloud"], json!("public"));
+        // Per-service.
+        assert_eq!(
+            op_storage_endpoint(json!({"account": "acct", "service": "queue"})).unwrap()
+                ["endpoint"],
+            json!("acct.queue.core.windows.net")
+        );
+        // China + US Gov suffixes — the differentiator vs build_blob_uri.
+        assert_eq!(
+            op_storage_endpoint(json!({"account": "acct", "cloud": "china"})).unwrap()["endpoint"],
+            json!("acct.blob.core.chinacloudapi.cn")
+        );
+        assert_eq!(
+            op_storage_endpoint(json!({"account": "acct", "service": "table", "cloud": "usgov"}))
+                .unwrap()["endpoint"],
+            json!("acct.table.core.usgovcloudapi.net")
+        );
+        // Cloud aliases are case-insensitive.
+        assert_eq!(
+            op_storage_endpoint(json!({"account": "a", "cloud": "AzureChinaCloud"})).unwrap()
+                ["suffix"],
+            json!("core.chinacloudapi.cn")
+        );
+        // Missing account, unknown service/cloud rejected.
+        assert!(op_storage_endpoint(json!({})).is_err());
+        assert!(op_storage_endpoint(json!({"account": "a", "service": "bogus"})).is_err());
+        assert!(op_storage_endpoint(json!({"account": "a", "cloud": "mars"})).is_err());
     }
 
     #[test]

@@ -369,6 +369,15 @@ fn Azure::build_blob_uri (%opts) {
     Azure::_decode("build_blob_uri", azure__build_blob_uri(to_json(\%opts)))->{uri}
 }
 
+## Build a storage service endpoint <account>.<service>.<suffix> with
+## sovereign-cloud awareness (what build_blob_uri's hardwired core.windows.net
+## can't reach). %opts: account (required), service (default "blob"), cloud
+## (default "public"; public/china/usgov). Returns { account, service, cloud,
+## suffix, endpoint, url }.
+fn Azure::storage_endpoint (%opts) {
+    Azure::_decode("storage_endpoint", azure__storage_endpoint(to_json(\%opts)))
+}
+
 ## Validate a storage account name (3-24 lowercase letters/numbers). Returns
 ## { name, valid, reason }.
 fn Azure::valid_storage_account_name ($name) {
