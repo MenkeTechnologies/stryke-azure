@@ -172,4 +172,12 @@ val $bg = Azure::valid_guid("{3f2504e0-4f89-41d3-9a0c-0305e82c3301}")
 assert_eq $bg->{valid}, 0,                "valid_guid: braces not accepted"
 assert_match qr/36 characters/, $bg->{reason}, "valid_guid: reason names the length"
 
+# normalize_guid: canonicalize Azure GUID formats to lowercase 8-4-4-4-12.
+val $canon = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+assert_eq Azure::normalize_guid($canon),                                  $canon, "normalize_guid: already canonical"
+assert_eq Azure::normalize_guid("3F2504E0-4F89-41D3-9A0C-0305E82C3301"),  $canon, "normalize_guid: lowercases"
+assert_eq Azure::normalize_guid("{3f2504e0-4f89-41d3-9a0c-0305e82c3301}"), $canon, "normalize_guid: strips braces"
+assert_eq Azure::normalize_guid("3f2504e04f8941d39a0c0305e82c3301"),      $canon, "normalize_guid: re-groups hyphenless"
+assert_dies fn { Azure::normalize_guid("3f2504e0") }, "normalize_guid: rejects too few hex digits"
+
 test_run

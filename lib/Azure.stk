@@ -398,3 +398,11 @@ fn Azure::valid_container_name ($name) {
 fn Azure::valid_guid ($guid) {
     Azure::_decode("valid_guid", azure__valid_guid(to_json({ guid => $guid })))
 }
+
+## Normalize a GUID to the canonical lowercase 8-4-4-4-12 form, accepting the
+## formats Azure IDs arrive in: hyphenated, hyphenless (32 hex), or wrapped in
+## braces {…} / parens (…). Returns a hashref { input, guid }; dies unless
+## exactly 32 hex digits remain.
+fn Azure::normalize_guid ($guid) {
+    Azure::_decode("normalize_guid", azure__normalize_guid(to_json({ guid => $guid })))->{guid}
+}

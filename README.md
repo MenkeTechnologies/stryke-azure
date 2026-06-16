@@ -112,6 +112,7 @@ Azure::storage_endpoint(%opts)           # account/service/cloud → { endpoint,
 Azure::valid_storage_account_name($name) # { name, valid, reason } — 3-24 lowercase alphanumerics
 Azure::valid_container_name($name)       # { name, valid, reason } — Blob container rules
 Azure::valid_guid($guid)                 # { guid, valid, reason } — 8-4-4-4-12 hex (subscription/tenant/client IDs)
+Azure::normalize_guid($guid)             # canonical lowercase 8-4-4-4-12; accepts braces/parens/hyphenless
 ```
 
 ## Packages

@@ -1019,6 +1019,43 @@ fn op_valid_guid(opts: Value) -> Result<Value> {
     Ok(json!({"guid": guid, "valid": reason.is_none(), "reason": reason}))
 }
 
+/// Normalize a GUID/UUID to the canonical lowercase `8-4-4-4-12` form, accepting
+/// the formats Azure IDs arrive in: hyphenated, hyphenless (32 hex), or wrapped
+/// in braces `{…}` or parens `(…)`. Strips the wrapper and any hyphens, lowercases
+/// the 32 hex digits, and re-groups them. opts: `guid` (or `id`). Returns
+/// `{input, guid}`; errors unless exactly 32 hex digits remain. Pure.
+fn op_normalize_guid(opts: Value) -> Result<Value> {
+    let raw = opts
+        .get("guid")
+        .or_else(|| opts.get("id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing guid"))?;
+    let s = raw.trim();
+    // Strip a single pair of surrounding braces or parens.
+    let s = s
+        .strip_prefix('{')
+        .and_then(|x| x.strip_suffix('}'))
+        .or_else(|| s.strip_prefix('(').and_then(|x| x.strip_suffix(')')))
+        .unwrap_or(s);
+    let hex: String = s
+        .chars()
+        .filter(|c| *c != '-')
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    if hex.len() != 32 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(anyhow!("not a GUID `{raw}` (need 32 hexadecimal digits)"));
+    }
+    let guid = format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    );
+    Ok(json!({"input": raw, "guid": guid}))
+}
+
 /// Parse an Azure storage blob endpoint URL into its parts. Handles the
 /// `https://<account>.<service>.core.windows.net/<container>/<blob>` form, where
 /// `service` is `blob`, `dfs` (ADLS Gen2), `queue`, `table`, or `file`. Returns
@@ -1270,6 +1307,11 @@ pub extern "C" fn azure__valid_container_name(args: *const c_char) -> *const c_c
 #[no_mangle]
 pub extern "C" fn azure__valid_guid(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_valid_guid(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__normalize_guid(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_normalize_guid(opts) })
 }
 
 // ── tests ────────────────────────────────────────────────────────────────────
@@ -1685,5 +1727,34 @@ mod ffi_tests {
             );
         }
         assert!(op_valid_guid(json!({})).is_err());
+    }
+
+    #[test]
+    fn normalize_guid_canonicalizes_azure_formats() {
+        let canon = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+        let norm = |g: &str| {
+            op_normalize_guid(json!({ "guid": g })).unwrap()["guid"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        // Already canonical, uppercase, braces, parens, and hyphenless all map
+        // to the same lowercase 8-4-4-4-12 form.
+        assert_eq!(norm(canon), canon);
+        assert_eq!(norm("3F2504E0-4F89-41D3-9A0C-0305E82C3301"), canon);
+        assert_eq!(norm("{3f2504e0-4f89-41d3-9a0c-0305e82c3301}"), canon);
+        assert_eq!(norm("(3F2504E0-4F89-41D3-9A0C-0305E82C3301)"), canon);
+        assert_eq!(norm("3f2504e04f8941d39a0c0305e82c3301"), canon);
+        assert_eq!(norm("  3f2504e0-4f89-41d3-9a0c-0305e82c3301  "), canon);
+        // The output validates under valid_guid.
+        assert_eq!(
+            op_valid_guid(json!({ "guid": norm("3f2504e04f8941d39a0c0305e82c3301") })).unwrap()
+                ["valid"],
+            json!(true)
+        );
+        // Too few/many hex digits, or non-hex, error.
+        assert!(op_normalize_guid(json!({"guid": "3f2504e0"})).is_err());
+        assert!(op_normalize_guid(json!({"guid": "3g2504e04f8941d39a0c0305e82c3301"})).is_err());
+        assert!(op_normalize_guid(json!({})).is_err());
     }
 }
