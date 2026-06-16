@@ -962,13 +962,14 @@ fn op_valid_storage_account_name(opts: Value) -> Result<Value> {
 /// Validate an Azure Blob container name: 3–63 chars of `[a-z0-9-]`, start
 /// alphanumeric, no consecutive hyphens, no trailing hyphen. Returns
 /// `{valid, reason}`. Pure.
-fn op_valid_container_name(opts: Value) -> Result<Value> {
-    let name = opts
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("missing name"))?;
+/// Shared rule for Azure storage names that must be valid DNS labels: 3–63
+/// characters of lowercase letters, digits and hyphens, starting with an
+/// alphanumeric, no consecutive hyphens, no trailing hyphen. Both Blob
+/// containers and Queues share this exact grammar, so both validators route
+/// through here. Returns `None` when valid, else the failure reason.
+fn dns_label_reason(name: &str) -> Option<&'static str> {
     let bytes = name.as_bytes();
-    let reason: Option<&str> = if name.len() < 3 || name.len() > 63 {
+    if name.len() < 3 || name.len() > 63 {
         Some("must be 3-63 characters")
     } else if !name
         .bytes()
@@ -983,7 +984,29 @@ fn op_valid_container_name(opts: Value) -> Result<Value> {
         Some("must not end with a hyphen")
     } else {
         None
-    };
+    }
+}
+
+fn op_valid_container_name(opts: Value) -> Result<Value> {
+    let name = opts
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing name"))?;
+    let reason = dns_label_reason(name);
+    Ok(json!({"name": name, "valid": reason.is_none(), "reason": reason}))
+}
+
+/// Validate an Azure Storage queue name. Queue names share the Blob-container
+/// DNS-label grammar exactly (3–63 chars, lowercase alphanumeric and hyphens,
+/// start alphanumeric, no consecutive/trailing hyphens) per the Queue service
+/// naming rules, so this routes through `dns_label_reason`. Returns `{name,
+/// valid, reason}`. Pure.
+fn op_valid_queue_name(opts: Value) -> Result<Value> {
+    let name = opts
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing name"))?;
+    let reason = dns_label_reason(name);
     Ok(json!({"name": name, "valid": reason.is_none(), "reason": reason}))
 }
 
@@ -1460,6 +1483,11 @@ pub extern "C" fn azure__valid_container_name(args: *const c_char) -> *const c_c
 }
 
 #[no_mangle]
+pub extern "C" fn azure__valid_queue_name(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_valid_queue_name(opts) })
+}
+
+#[no_mangle]
 pub extern "C" fn azure__valid_table_name(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_valid_table_name(opts) })
 }
@@ -1931,6 +1959,40 @@ mod ffi_tests {
                 v["reason"]
             );
         }
+    }
+
+    #[test]
+    fn valid_queue_name_shares_container_grammar() {
+        // Queue names use the same DNS-label rule as containers.
+        for name in ["my-queue-1", "orders", "abc"] {
+            assert_eq!(
+                op_valid_queue_name(json!({ "name": name })).unwrap()["valid"],
+                json!(true),
+                "{name}"
+            );
+            // Identical verdict to the container validator (shared helper).
+            assert_eq!(
+                op_valid_queue_name(json!({ "name": name })).unwrap(),
+                op_valid_container_name(json!({ "name": name })).unwrap(),
+                "{name}"
+            );
+        }
+        for (name, want) in [
+            ("ab", "3-63"),
+            ("Queue", "lowercase"),
+            ("-lead", "start with a letter or number"),
+            ("a--b", "consecutive hyphens"),
+            ("trail-", "end with a hyphen"),
+        ] {
+            let v = op_valid_queue_name(json!({ "name": name })).unwrap();
+            assert_eq!(v["valid"], json!(false), "{name}");
+            assert!(
+                v["reason"].as_str().unwrap().contains(want),
+                "{name}: {}",
+                v["reason"]
+            );
+        }
+        assert!(op_valid_queue_name(json!({})).is_err());
     }
 
     #[test]

@@ -401,6 +401,14 @@ fn Azure::valid_container_name ($name) {
         azure__valid_container_name(to_json({ name => $name })))
 }
 
+## Validate an Azure Storage queue name: 3-63 chars of lowercase letters,
+## numbers and hyphens, starting alphanumeric, no consecutive/trailing hyphens
+## (same DNS-label grammar as a container). Returns { name, valid, reason }.
+fn Azure::valid_queue_name ($name) {
+    Azure::_decode("valid_queue_name",
+        azure__valid_queue_name(to_json({ name => $name })))
+}
+
 ## Validate an Azure Table Storage table name (^[A-Za-z][A-Za-z0-9]{2,62}$):
 ## 3-63 alphanumeric chars, must begin with a letter, case-insensitive, "tables"
 ## reserved. Returns { name, valid, reason }.

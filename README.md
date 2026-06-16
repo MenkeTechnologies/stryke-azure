@@ -112,6 +112,7 @@ Azure::storage_endpoint(%opts)           # account/service/cloud → { endpoint,
 Azure::parse_storage_endpoint($endpoint) # inverse: host/URL → { endpoint, account, service, cloud, suffix, url }
 Azure::valid_storage_account_name($name) # { name, valid, reason } — 3-24 lowercase alphanumerics
 Azure::valid_container_name($name)       # { name, valid, reason } — Blob container rules
+Azure::valid_queue_name($name)           # { name, valid, reason } — Queue rules (same DNS-label grammar as a container)
 Azure::valid_table_name($name)           # { name, valid, reason } — Table name ^[A-Za-z][A-Za-z0-9]{2,62}$, "tables" reserved
 Azure::valid_cosmos_id($id)              # { id, valid, reason } — Cosmos DB database/container id: ≤255 chars, no / or \
 Azure::valid_guid($guid)                 # { guid, valid, reason } — 8-4-4-4-12 hex (subscription/tenant/client IDs)
