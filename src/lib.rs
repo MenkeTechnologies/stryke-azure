@@ -1066,6 +1066,42 @@ fn op_valid_table_name(opts: Value) -> Result<Value> {
     Ok(json!({"name": name, "valid": reason.is_none(), "reason": reason}))
 }
 
+/// Validate an Azure Storage blob name per the documented Blob service rules: 1
+/// to 1,024 characters, case-sensitive, the number of `/`-delimited path segments
+/// may not exceed 254, and the name must not end with a dot (`.`), a forward
+/// slash (`/`), or a combination of the two. Any character is otherwise allowed
+/// (reserved URL characters must be escaped by the caller). The blob-path member
+/// of the `valid_*` family — pairs with `parse_blob_uri`/`build_blob_uri`. opts:
+/// `name` (or `blob`, required). Returns `{name, valid, reason, characters,
+/// segments}`. Pure.
+fn op_valid_blob_name(opts: Value) -> Result<Value> {
+    let name = opts
+        .get("name")
+        .or_else(|| opts.get("blob"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing name"))?;
+    let characters = name.chars().count();
+    let segments = name.split('/').count();
+    let reason: Option<&str> = if name.is_empty() {
+        Some("must be at least 1 character")
+    } else if characters > 1024 {
+        Some("must be at most 1024 characters")
+    } else if segments > 254 {
+        Some("must not exceed 254 path segments")
+    } else if name.ends_with('.') || name.ends_with('/') {
+        Some("must not end with a dot or a forward slash")
+    } else {
+        None
+    };
+    Ok(json!({
+        "name": name,
+        "valid": reason.is_none(),
+        "reason": reason,
+        "characters": characters,
+        "segments": segments,
+    }))
+}
+
 /// Validate an Azure Cosmos DB resource ID — a database or container name —
 /// against the documented limits
 /// (learn.microsoft.com/azure/cosmos-db/concepts-limits): 1–255 characters, and
@@ -1520,6 +1556,11 @@ pub extern "C" fn azure__valid_storage_account_name(args: *const c_char) -> *con
 #[no_mangle]
 pub extern "C" fn azure__valid_container_name(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_valid_container_name(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__valid_blob_name(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_valid_blob_name(opts) })
 }
 
 #[no_mangle]
@@ -2132,6 +2173,41 @@ mod ffi_tests {
             json!(true)
         );
         assert!(op_valid_cosmos_id(json!({})).is_err());
+    }
+
+    #[test]
+    fn valid_blob_name_enforces_blob_service_rules() {
+        let chk = |n: &str| op_valid_blob_name(json!({ "name": n })).unwrap();
+        // Valid: a single char, a deep virtual path, the 1024-char max.
+        assert_eq!(chk("a")["valid"], json!(true), "single char is fine");
+        assert_eq!(chk("logs/2026/06/16/app.log")["valid"], json!(true));
+        assert_eq!(chk(&"a".repeat(1024))["valid"], json!(true));
+        // segments/characters are surfaced.
+        let p = chk("a/b/c");
+        assert_eq!(p["segments"], json!(3));
+        assert_eq!(p["characters"], json!(5));
+        // Empty / too long.
+        assert_eq!(chk("")["valid"], json!(false));
+        let long = chk(&"a".repeat(1025));
+        assert_eq!(long["valid"], json!(false));
+        assert!(long["reason"].as_str().unwrap().contains("1024"));
+        // Over 254 path segments (255 segments = 254 slashes).
+        let deep = "a/".repeat(254) + "b"; // 255 segments
+        assert_eq!(chk(&deep)["valid"], json!(false));
+        assert!(chk(&deep)["reason"].as_str().unwrap().contains("254"));
+        // 254 segments is the limit and is allowed.
+        let edge = "a/".repeat(253) + "b"; // 254 segments
+        assert_eq!(chk(&edge)["valid"], json!(true));
+        // Must not end with a dot or a slash (or a combination).
+        for bad in ["foo.", "foo/", "foo./", "bar/."] {
+            assert_eq!(chk(bad)["valid"], json!(false), "`{bad}` should be invalid");
+        }
+        // `blob` alias and the missing-arg error.
+        assert_eq!(
+            op_valid_blob_name(json!({"blob": "data.bin"})).unwrap()["valid"],
+            json!(true)
+        );
+        assert!(op_valid_blob_name(json!({})).is_err());
     }
 
     #[test]

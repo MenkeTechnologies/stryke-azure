@@ -184,6 +184,16 @@ val $cn = Azure::valid_container_name("a--b")
 assert_eq $cn->{valid}, 0, "valid_container_name: rejects consecutive hyphens"
 assert_match qr/consecutive/, $cn->{reason}, "valid_container_name: reason names the rule"
 
+# valid_blob_name: Blob service rules (1-1024 chars, ≤254 segments, no trailing dot/slash).
+assert_ok Azure::valid_blob_name("logs/2026/06/16/app.log")->{valid}, "valid_blob_name: virtual path is fine"
+val $bn = Azure::valid_blob_name("a/b/c")
+assert_eq $bn->{segments}, 3,   "valid_blob_name: reports path-segment count"
+assert_eq $bn->{characters}, 5, "valid_blob_name: reports character count"
+assert_eq Azure::valid_blob_name("")->{valid}, 0,        "valid_blob_name: rejects empty"
+assert_eq Azure::valid_blob_name("report/")->{valid}, 0, "valid_blob_name: rejects a trailing slash"
+assert_eq Azure::valid_blob_name("report.")->{valid}, 0, "valid_blob_name: rejects a trailing dot"
+assert_match qr/254/, Azure::valid_blob_name("a/" x 254 . "b")->{reason}, "valid_blob_name: rejects over 254 segments"
+
 # valid_queue_name: same DNS-label grammar as a container.
 assert_ok Azure::valid_queue_name("order-events")->{valid}, "valid_queue_name: legal"
 val $qn = Azure::valid_queue_name("Bad_Queue")

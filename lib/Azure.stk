@@ -410,6 +410,16 @@ fn Azure::valid_container_name ($name) {
         azure__valid_container_name(to_json({ name => $name })))
 }
 
+## Validate a Blob name per the Blob service rules: 1-1024 characters,
+## case-sensitive, at most 254 `/`-delimited path segments, and must not end with
+## a dot or a forward slash. The blob-path member of the valid_* family (pairs
+## with parse_blob_uri/build_blob_uri). Returns { name, valid, reason,
+## characters, segments }.
+fn Azure::valid_blob_name ($name) {
+    Azure::_decode("valid_blob_name",
+        azure__valid_blob_name(to_json({ name => $name })))
+}
+
 ## Validate an Azure Storage queue name: 3-63 chars of lowercase letters,
 ## numbers and hyphens, starting alphanumeric, no consecutive/trailing hyphens
 ## (same DNS-label grammar as a container). Returns { name, valid, reason }.
