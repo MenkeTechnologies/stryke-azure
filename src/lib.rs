@@ -1103,6 +1103,17 @@ fn storage_suffix_of(cloud: &str) -> Option<&'static str> {
     }
 }
 
+/// Map a storage DNS suffix back to its canonical cloud name — the inverse of
+/// `storage_suffix_of`, used by `parse_storage_endpoint`.
+fn cloud_for_suffix(suffix: &str) -> Option<&'static str> {
+    match suffix {
+        "core.windows.net" => Some("public"),
+        "core.chinacloudapi.cn" => Some("china"),
+        "core.usgovcloudapi.net" => Some("usgov"),
+        _ => None,
+    }
+}
+
 fn op_parse_blob_uri(opts: Value) -> Result<Value> {
     let uri = opts
         .get("uri")
@@ -1219,6 +1230,50 @@ fn op_storage_endpoint(opts: Value) -> Result<Value> {
     }))
 }
 
+/// Parse an Azure Storage endpoint back into its parts — the inverse of
+/// `storage_endpoint`. Accepts a bare host (`acct.blob.core.windows.net`) or a
+/// full URL (scheme and any path/query are stripped). The host is split into
+/// `<account>.<service>.<suffix>`; the service is validated against the storage
+/// services (blob/dfs/queue/table/file) and the suffix is mapped back to its
+/// canonical cloud (public/china/usgov). opts: `endpoint` (or `url`). Returns
+/// `{endpoint, account, service, cloud, suffix, url}`. Pure.
+fn op_parse_storage_endpoint(opts: Value) -> Result<Value> {
+    let raw = opts
+        .get("endpoint")
+        .or_else(|| opts.get("url"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing endpoint"))?;
+    // Tolerate a full URL: drop the scheme and any path/query after the host.
+    let host = raw
+        .strip_prefix("https://")
+        .or_else(|| raw.strip_prefix("http://"))
+        .unwrap_or(raw);
+    let host = host.split(['/', '?']).next().unwrap_or(host);
+    let (account, rest) = host
+        .split_once('.')
+        .ok_or_else(|| anyhow!("not a storage endpoint host `{host}`"))?;
+    if account.is_empty() {
+        return Err(anyhow!("storage endpoint has no account: `{host}`"));
+    }
+    let (service, suffix) = rest
+        .split_once('.')
+        .ok_or_else(|| anyhow!("not a storage endpoint host `{host}`"))?;
+    if !is_storage_service(service) {
+        return Err(anyhow!("unknown storage service `{service}`"));
+    }
+    let cloud =
+        cloud_for_suffix(suffix).ok_or_else(|| anyhow!("unknown storage suffix `{suffix}`"))?;
+    let endpoint = format!("{account}.{service}.{suffix}");
+    Ok(json!({
+        "endpoint": endpoint,
+        "account": account,
+        "service": service,
+        "cloud": cloud,
+        "suffix": suffix,
+        "url": format!("https://{endpoint}"),
+    }))
+}
+
 // ── exports ──────────────────────────────────────────────────────────────────
 
 macro_rules! export {
@@ -1313,6 +1368,11 @@ pub extern "C" fn azure__build_blob_uri(args: *const c_char) -> *const c_char {
 #[no_mangle]
 pub extern "C" fn azure__storage_endpoint(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_storage_endpoint(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__parse_storage_endpoint(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_parse_storage_endpoint(opts) })
 }
 
 #[no_mangle]
@@ -1687,6 +1747,71 @@ mod ffi_tests {
         assert!(op_storage_endpoint(json!({})).is_err());
         assert!(op_storage_endpoint(json!({"account": "a", "service": "bogus"})).is_err());
         assert!(op_storage_endpoint(json!({"account": "a", "cloud": "mars"})).is_err());
+    }
+
+    #[test]
+    fn parse_storage_endpoint_inverts_storage_endpoint() {
+        // Bare host: every part recovered, suffix mapped to its canonical cloud.
+        let v = op_parse_storage_endpoint(json!({"endpoint": "mystore.blob.core.windows.net"}))
+            .unwrap();
+        assert_eq!(v["account"], json!("mystore"));
+        assert_eq!(v["service"], json!("blob"));
+        assert_eq!(v["cloud"], json!("public"));
+        assert_eq!(v["suffix"], json!("core.windows.net"));
+        assert_eq!(v["url"], json!("https://mystore.blob.core.windows.net"));
+        // A full URL with a path resolves to the same host.
+        assert_eq!(
+            op_parse_storage_endpoint(
+                json!({"url": "https://acct.queue.core.windows.net/q/messages"})
+            )
+            .unwrap()["service"],
+            json!("queue")
+        );
+        // Sovereign clouds map back to their canonical names.
+        assert_eq!(
+            op_parse_storage_endpoint(json!({"endpoint": "acct.table.core.usgovcloudapi.net"}))
+                .unwrap()["cloud"],
+            json!("usgov")
+        );
+        assert_eq!(
+            op_parse_storage_endpoint(json!({"endpoint": "acct.blob.core.chinacloudapi.cn"}))
+                .unwrap()["cloud"],
+            json!("china")
+        );
+        // Round-trips storage_endpoint for every service × cloud.
+        for (service, cloud) in [
+            ("blob", "public"),
+            ("queue", "china"),
+            ("table", "usgov"),
+            ("dfs", "public"),
+            ("file", "public"),
+        ] {
+            let built =
+                op_storage_endpoint(json!({"account": "acct", "service": service, "cloud": cloud}))
+                    .unwrap()["endpoint"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
+            let p = op_parse_storage_endpoint(json!({ "endpoint": built })).unwrap();
+            assert_eq!(p["account"], json!("acct"));
+            assert_eq!(
+                p["service"],
+                json!(service),
+                "service round-trip {service}/{cloud}"
+            );
+            assert_eq!(
+                p["cloud"],
+                json!(cloud),
+                "cloud round-trip {service}/{cloud}"
+            );
+        }
+        // Errors: not a storage host, unknown service, unknown suffix, missing.
+        assert!(op_parse_storage_endpoint(json!({"endpoint": "acct"})).is_err());
+        assert!(
+            op_parse_storage_endpoint(json!({"endpoint": "acct.bogus.core.windows.net"})).is_err()
+        );
+        assert!(op_parse_storage_endpoint(json!({"endpoint": "acct.blob.example.com"})).is_err());
+        assert!(op_parse_storage_endpoint(json!({})).is_err());
     }
 
     #[test]

@@ -109,6 +109,7 @@ Azure::build_connection_string(%pairs)   # { Key => Value } → Key=Value;... (b
 Azure::parse_blob_uri($uri)              # https://<acct>.<service>.core.windows.net/<container>/<blob> → { account, service, host, container, blob }
 Azure::build_blob_uri(%opts)             # account/service/container/blob → blob endpoint URL; inverse of parse_blob_uri
 Azure::storage_endpoint(%opts)           # account/service/cloud → { endpoint, url, suffix, … }; sovereign clouds (public/china/usgov)
+Azure::parse_storage_endpoint($endpoint) # inverse: host/URL → { endpoint, account, service, cloud, suffix, url }
 Azure::valid_storage_account_name($name) # { name, valid, reason } — 3-24 lowercase alphanumerics
 Azure::valid_container_name($name)       # { name, valid, reason } — Blob container rules
 Azure::valid_table_name($name)           # { name, valid, reason } — Table name ^[A-Za-z][A-Za-z0-9]{2,62}$, "tables" reserved

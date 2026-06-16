@@ -378,6 +378,15 @@ fn Azure::storage_endpoint (%opts) {
     Azure::_decode("storage_endpoint", azure__storage_endpoint(to_json(\%opts)))
 }
 
+## Parse a storage endpoint back into its parts — inverse of storage_endpoint.
+## $endpoint may be a bare host (acct.blob.core.windows.net) or a full URL (scheme
+## and path stripped). The service is validated (blob/dfs/queue/table/file) and the
+## suffix mapped to its canonical cloud (public/china/usgov). Returns a hashref
+## { endpoint, account, service, cloud, suffix, url }.
+fn Azure::parse_storage_endpoint ($endpoint) {
+    Azure::_decode("parse_storage_endpoint", azure__parse_storage_endpoint(to_json({ endpoint => $endpoint })))
+}
+
 ## Validate a storage account name (3-24 lowercase letters/numbers). Returns
 ## { name, valid, reason }.
 fn Azure::valid_storage_account_name ($name) {

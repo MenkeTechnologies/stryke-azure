@@ -155,6 +155,19 @@ assert_eq Azure::storage_endpoint(account => "acct", cloud => "china")->{endpoin
 assert_eq Azure::storage_endpoint(account => "acct", service => "table", cloud => "usgov")->{endpoint}, "acct.table.core.usgovcloudapi.net", "storage_endpoint: US Gov suffix"
 assert_dies fn { Azure::storage_endpoint(account => "a", cloud => "mars") }, "storage_endpoint: rejects an unknown cloud"
 
+# parse_storage_endpoint: inverse of storage_endpoint.
+val $pe = Azure::parse_storage_endpoint("mystore.blob.core.windows.net")
+assert_eq $pe->{account}, "mystore", "parse_storage_endpoint: account extracted"
+assert_eq $pe->{service}, "blob",    "parse_storage_endpoint: service extracted"
+assert_eq $pe->{cloud},   "public",  "parse_storage_endpoint: suffix → public cloud"
+# Full URL with a path resolves to the same host.
+assert_eq Azure::parse_storage_endpoint("https://acct.queue.core.windows.net/q/messages")->{service}, "queue", "parse_storage_endpoint: strips scheme + path"
+# Sovereign clouds map back.
+assert_eq Azure::parse_storage_endpoint("acct.table.core.usgovcloudapi.net")->{cloud}, "usgov", "parse_storage_endpoint: US Gov cloud"
+# Round-trips storage_endpoint.
+assert_eq Azure::parse_storage_endpoint(Azure::storage_endpoint(account => "acct", service => "table", cloud => "china")->{endpoint})->{cloud}, "china", "parse_storage_endpoint: round-trips storage_endpoint"
+assert_dies fn { Azure::parse_storage_endpoint("acct.bogus.core.windows.net") }, "parse_storage_endpoint: rejects an unknown service"
+
 assert_ok Azure::valid_storage_account_name("mystore123")->{valid}, "valid_storage_account_name: legal"
 assert_eq Azure::valid_storage_account_name("My-Store")->{valid}, 0, "valid_storage_account_name: rejects upper+hyphen"
 
