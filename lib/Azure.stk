@@ -409,6 +409,13 @@ fn Azure::valid_table_name ($name) {
         azure__valid_table_name(to_json({ name => $name })))
 }
 
+## Validate a Cosmos DB resource id ($id — a database or container name): 1-255
+## chars, may not contain "/" or "\" (the only chars the service forbids).
+## Alphanumeric ASCII is recommended (not enforced). Returns { id, valid, reason }.
+fn Azure::valid_cosmos_id ($id) {
+    Azure::_decode("valid_cosmos_id", azure__valid_cosmos_id(to_json({ id => $id })))
+}
+
 ## Validate an Azure GUID (the 8-4-4-4-12 hex form used for subscription, tenant,
 ## client, and object IDs). Hex is case-insensitive; braces are not accepted.
 ## Returns a hashref { guid, valid, reason } (reason undef when valid).

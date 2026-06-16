@@ -1011,6 +1011,31 @@ fn op_valid_table_name(opts: Value) -> Result<Value> {
     Ok(json!({"name": name, "valid": reason.is_none(), "reason": reason}))
 }
 
+/// Validate an Azure Cosmos DB resource ID — a database or container name —
+/// against the documented limits
+/// (learn.microsoft.com/azure/cosmos-db/concepts-limits): 1–255 characters, and
+/// it may not contain `/` or `\` (the only characters the service forbids in an
+/// id). Microsoft additionally recommends sticking to alphanumeric ASCII for
+/// SDK/connector interoperability, which this does not enforce. opts: `id` (or
+/// `name`). Returns `{id, valid, reason}`. Pure.
+fn op_valid_cosmos_id(opts: Value) -> Result<Value> {
+    let id = opts
+        .get("id")
+        .or_else(|| opts.get("name"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing id"))?;
+    let reason: Option<&str> = if id.is_empty() {
+        Some("must not be empty")
+    } else if id.chars().count() > 255 {
+        Some("must be at most 255 characters")
+    } else if id.contains('/') || id.contains('\\') {
+        Some("must not contain `/` or `\\`")
+    } else {
+        None
+    };
+    Ok(json!({"id": id, "valid": reason.is_none(), "reason": reason}))
+}
+
 /// Validate an Azure GUID — the canonical `8-4-4-4-12` hex form Azure uses for
 /// subscription, tenant, client, and object IDs (e.g. the `subscription` that
 /// feeds `build_resource_id`). Hex is case-insensitive; braces/URN prefixes are
@@ -1391,6 +1416,11 @@ pub extern "C" fn azure__valid_container_name(args: *const c_char) -> *const c_c
 #[no_mangle]
 pub extern "C" fn azure__valid_table_name(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_valid_table_name(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__valid_cosmos_id(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_valid_cosmos_id(opts) })
 }
 
 #[no_mangle]
@@ -1885,6 +1915,33 @@ mod ffi_tests {
         // A name that merely contains "tables" is fine.
         assert_eq!(chk("tablesx")["valid"], json!(true));
         assert!(op_valid_table_name(json!({})).is_err());
+    }
+
+    #[test]
+    fn valid_cosmos_id_enforces_length_and_forbidden_slashes() {
+        let chk = |id: &str| op_valid_cosmos_id(json!({ "id": id })).unwrap();
+        // Valid: ordinary names, including ones with chars Table Storage forbids
+        // (hyphens, dots) but Cosmos allows.
+        assert_eq!(chk("my-database")["valid"], json!(true));
+        assert_eq!(chk("Orders.2025_v2")["valid"], json!(true));
+        assert_eq!(chk("a")["valid"], json!(true), "single char is fine");
+        assert_eq!(chk(&"a".repeat(255))["valid"], json!(true));
+        // 256 chars is too long.
+        let long = chk(&"a".repeat(256));
+        assert_eq!(long["valid"], json!(false));
+        assert!(long["reason"].as_str().unwrap().contains("255"));
+        // The two forbidden characters.
+        let fwd = chk("a/b");
+        assert_eq!(fwd["valid"], json!(false));
+        assert!(fwd["reason"].as_str().unwrap().contains("/"));
+        assert_eq!(chk("a\\b")["valid"], json!(false));
+        // Empty rejected; `name` is an alias for `id`.
+        assert_eq!(chk("")["valid"], json!(false));
+        assert_eq!(
+            op_valid_cosmos_id(json!({"name": "Inventory"})).unwrap()["valid"],
+            json!(true)
+        );
+        assert!(op_valid_cosmos_id(json!({})).is_err());
     }
 
     #[test]

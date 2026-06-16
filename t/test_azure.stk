@@ -186,6 +186,14 @@ assert_eq $tr->{valid}, 0,                                 "valid_table_name: 't
 assert_match qr/reserved/, $tr->{reason},                  "valid_table_name: reason names the reservation"
 assert_ok Azure::valid_table_name("tablesx")->{valid},     "valid_table_name: a name containing 'tables' is fine"
 
+# valid_cosmos_id: Cosmos DB database/container id — ≤255, no / or \.
+assert_ok Azure::valid_cosmos_id("my-database")->{valid},   "valid_cosmos_id: hyphens/letters ok"
+assert_ok Azure::valid_cosmos_id("Orders.2025_v2")->{valid}, "valid_cosmos_id: dots/underscores ok"
+assert_eq Azure::valid_cosmos_id("a/b")->{valid}, 0,        "valid_cosmos_id: forward slash forbidden"
+assert_eq Azure::valid_cosmos_id("a\\b")->{valid}, 0,       "valid_cosmos_id: backslash forbidden"
+assert_eq Azure::valid_cosmos_id("")->{valid}, 0,           "valid_cosmos_id: empty rejected"
+assert_dies fn { Azure::valid_cosmos_id() }, "valid_cosmos_id: dies on missing id"
+
 # valid_guid: Azure GUID 8-4-4-4-12 hex form.
 assert_ok Azure::valid_guid("3f2504e0-4f89-41d3-9a0c-0305e82c3301")->{valid}, "valid_guid: canonical GUID"
 assert_ok Azure::valid_guid("3F2504E0-4F89-41D3-9A0C-0305E82C3301")->{valid}, "valid_guid: uppercase hex"
