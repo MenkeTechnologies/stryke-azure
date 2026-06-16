@@ -116,6 +116,7 @@ Azure::valid_table_name($name)           # { name, valid, reason } — Table nam
 Azure::valid_cosmos_id($id)              # { id, valid, reason } — Cosmos DB database/container id: ≤255 chars, no / or \
 Azure::valid_guid($guid)                 # { guid, valid, reason } — 8-4-4-4-12 hex (subscription/tenant/client IDs)
 Azure::normalize_guid($guid)             # canonical lowercase 8-4-4-4-12; accepts braces/parens/hyphenless
+Azure::format_guid($guid, $format?)      # re-emit in a .NET specifier: N (no hyphens) / D (default) / B {…} / P (…)
 ```
 
 ## Packages

@@ -430,3 +430,12 @@ fn Azure::valid_guid ($guid) {
 fn Azure::normalize_guid ($guid) {
     Azure::_decode("normalize_guid", azure__normalize_guid(to_json({ guid => $guid })))->{guid}
 }
+
+## Re-emit a GUID in a .NET Guid.ToString format specifier — the formatting
+## companion of normalize_guid (which always gives the D form). Accepts any input
+## format; $format is N (32 digits, no hyphens), D (hyphenated, default), B
+## ({hyphenated}), or P ((hyphenated)), case-insensitive. Output hex is lowercase.
+## Returns the formatted string.
+fn Azure::format_guid ($guid, $format = "D") {
+    Azure::_decode("format_guid", azure__format_guid(to_json({ guid => $guid, format => $format })))->{guid}
+}

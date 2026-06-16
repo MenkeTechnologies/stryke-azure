@@ -137,5 +137,6 @@ assert_ok exists &Azure::valid_table_name, "Azure::valid_table_name exists"
 assert_ok exists &Azure::valid_cosmos_id, "Azure::valid_cosmos_id exists"
 assert_ok exists &Azure::valid_guid, "Azure::valid_guid exists"
 assert_ok exists &Azure::normalize_guid, "Azure::normalize_guid exists"
+assert_ok exists &Azure::format_guid, "Azure::format_guid exists"
 
 test_run

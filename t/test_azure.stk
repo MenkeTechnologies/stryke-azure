@@ -211,4 +211,13 @@ assert_eq Azure::normalize_guid("{3f2504e0-4f89-41d3-9a0c-0305e82c3301}"), $cano
 assert_eq Azure::normalize_guid("3f2504e04f8941d39a0c0305e82c3301"),      $canon, "normalize_guid: re-groups hyphenless"
 assert_dies fn { Azure::normalize_guid("3f2504e0") }, "normalize_guid: rejects too few hex digits"
 
+# format_guid: re-emit in a .NET format specifier (N/D/B/P).
+assert_eq Azure::format_guid($canon, "N"), "3f2504e04f8941d39a0c0305e82c3301", "format_guid: N drops the hyphens"
+assert_eq Azure::format_guid($canon, "D"), $canon,                             "format_guid: D is the hyphenated form"
+assert_eq Azure::format_guid($canon, "B"), "{$canon}",                         "format_guid: B wraps in braces"
+assert_eq Azure::format_guid($canon, "P"), "($canon)",                         "format_guid: P wraps in parens"
+assert_eq Azure::format_guid("{3F2504E0-4F89-41D3-9A0C-0305E82C3301}", "n"), "3f2504e04f8941d39a0c0305e82c3301", "format_guid: case-insensitive specifier, any input form"
+assert_eq Azure::format_guid($canon), $canon, "format_guid: defaults to D"
+assert_dies fn { Azure::format_guid($canon, "X") }, "format_guid: rejects the unsupported X specifier"
+
 test_run

@@ -1073,12 +1073,11 @@ fn op_valid_guid(opts: Value) -> Result<Value> {
 /// in braces `{…}` or parens `(…)`. Strips the wrapper and any hyphens, lowercases
 /// the 32 hex digits, and re-groups them. opts: `guid` (or `id`). Returns
 /// `{input, guid}`; errors unless exactly 32 hex digits remain. Pure.
-fn op_normalize_guid(opts: Value) -> Result<Value> {
-    let raw = opts
-        .get("guid")
-        .or_else(|| opts.get("id"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("missing guid"))?;
+/// Extract the 32 lowercase hex digits of a GUID given in any accepted input
+/// format (bare `N`, hyphenated `D`, brace-wrapped `B`, or paren-wrapped `P`).
+/// Shared by `normalize_guid` and `format_guid`; errors when the input is not 32
+/// hexadecimal digits.
+fn guid_hex(raw: &str) -> Result<String> {
     let s = raw.trim();
     // Strip a single pair of surrounding braces or parens.
     let s = s
@@ -1094,15 +1093,62 @@ fn op_normalize_guid(opts: Value) -> Result<Value> {
     if hex.len() != 32 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(anyhow!("not a GUID `{raw}` (need 32 hexadecimal digits)"));
     }
-    let guid = format!(
+    Ok(hex)
+}
+
+/// Hyphenate 32 hex digits into the canonical `8-4-4-4-12` (`D`) form.
+fn guid_hyphenate(hex: &str) -> String {
+    format!(
         "{}-{}-{}-{}-{}",
         &hex[0..8],
         &hex[8..12],
         &hex[12..16],
         &hex[16..20],
         &hex[20..32]
-    );
+    )
+}
+
+fn op_normalize_guid(opts: Value) -> Result<Value> {
+    let raw = opts
+        .get("guid")
+        .or_else(|| opts.get("id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing guid"))?;
+    let guid = guid_hyphenate(&guid_hex(raw)?);
     Ok(json!({"input": raw, "guid": guid}))
+}
+
+/// Re-emit a GUID in one of the .NET `Guid.ToString` format specifiers — the
+/// formatting companion of `normalize_guid` (which always produces the `D` form).
+/// Accepts any input format and a target `format`: `N` (32 digits, no hyphens),
+/// `D` (hyphenated, the default), `B` (`{hyphenated}`), or `P` (`(hyphenated)`).
+/// Output hex is lowercase, matching .NET; the `X` specifier is not supported.
+/// opts: `guid` (or `id`, required), `format` (default `D`, case-insensitive).
+/// Returns `{input, format, guid}`. Pure.
+fn op_format_guid(opts: Value) -> Result<Value> {
+    let raw = opts
+        .get("guid")
+        .or_else(|| opts.get("id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing guid"))?;
+    let fmt = opts
+        .get("format")
+        .and_then(Value::as_str)
+        .unwrap_or("D")
+        .to_ascii_uppercase();
+    let d = guid_hyphenate(&guid_hex(raw)?);
+    let out = match fmt.as_str() {
+        "N" => d.replace('-', ""),
+        "D" => d,
+        "B" => format!("{{{d}}}"),
+        "P" => format!("({d})"),
+        other => {
+            return Err(anyhow!(
+                "unsupported GUID format `{other}` (want N, D, B, or P)"
+            ))
+        }
+    };
+    Ok(json!({"input": raw, "format": fmt, "guid": out}))
 }
 
 /// Parse an Azure storage blob endpoint URL into its parts. Handles the
@@ -1431,6 +1477,11 @@ pub extern "C" fn azure__valid_guid(args: *const c_char) -> *const c_char {
 #[no_mangle]
 pub extern "C" fn azure__normalize_guid(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_normalize_guid(opts) })
+}
+
+#[no_mangle]
+pub extern "C" fn azure__format_guid(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_format_guid(opts) })
 }
 
 // ── tests ────────────────────────────────────────────────────────────────────
@@ -2002,5 +2053,42 @@ mod ffi_tests {
         assert!(op_normalize_guid(json!({"guid": "3f2504e0"})).is_err());
         assert!(op_normalize_guid(json!({"guid": "3g2504e04f8941d39a0c0305e82c3301"})).is_err());
         assert!(op_normalize_guid(json!({})).is_err());
+    }
+
+    #[test]
+    fn format_guid_emits_dotnet_specifiers() {
+        let canon = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+        let fmt = |g: &str, f: &str| {
+            op_format_guid(json!({ "guid": g, "format": f })).unwrap()["guid"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        // The four punctuation forms, output lowercase like .NET.
+        assert_eq!(fmt(canon, "N"), "3f2504e04f8941d39a0c0305e82c3301");
+        assert_eq!(fmt(canon, "D"), canon);
+        assert_eq!(fmt(canon, "B"), format!("{{{canon}}}"));
+        assert_eq!(fmt(canon, "P"), format!("({canon})"));
+        // The specifier is case-insensitive and any input format is accepted.
+        assert_eq!(
+            fmt("3F2504E04F8941D39A0C0305E82C3301", "b"),
+            format!("{{{canon}}}")
+        );
+        // Default format is D.
+        assert_eq!(
+            op_format_guid(json!({"guid": canon})).unwrap()["guid"],
+            json!(canon)
+        );
+        // normalize_guid is exactly format_guid in the D form.
+        assert_eq!(
+            fmt("{3f2504e0-4f89-41d3-9a0c-0305e82c3301}", "D"),
+            op_normalize_guid(json!({"guid": canon})).unwrap()["guid"]
+                .as_str()
+                .unwrap()
+        );
+        // Bad format and bad GUID error.
+        assert!(op_format_guid(json!({"guid": canon, "format": "X"})).is_err());
+        assert!(op_format_guid(json!({"guid": "nope", "format": "N"})).is_err());
+        assert!(op_format_guid(json!({})).is_err());
     }
 }
