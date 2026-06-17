@@ -123,6 +123,15 @@ assert_eq Azure::build_resource_id(subscription => "s"), "/subscriptions/s", "bu
 assert_eq Azure::build_resource_id(subscription => $rid->{subscription}, resource_group => $rid->{resource_group}, provider => $rid->{provider}, types => $rid->{types}), "/subscriptions/abc-123/resourceGroups/my-rg/providers/Microsoft.Storage/storageAccounts/mystore", "build_resource_id: round-trips parse_resource_id"
 assert_dies fn { Azure::build_resource_id(types => [{ type => "x", name => "y" }]) }, "build_resource_id: types without provider errors"
 
+# resource_id_parent: ARM RBAC-scope "dirname".
+assert_eq Azure::resource_id_parent("/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/acct")->{parent}, "/subscriptions/s/resourceGroups/rg", "resource_id_parent: resource → resource-group scope"
+assert_eq Azure::resource_id_parent("/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/acct/blobServices/default")->{parent}, "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/acct", "resource_id_parent: nested resource drops only its leaf pair"
+assert_eq Azure::resource_id_parent("/subscriptions/s/resourceGroups/rg")->{parent}, "/subscriptions/s", "resource_id_parent: resource group → subscription"
+val $subp = Azure::resource_id_parent("/subscriptions/s")
+assert_eq $subp->{parent}, "",     "resource_id_parent: subscription parent is empty"
+assert_eq $subp->{has_parent}, 0,  "resource_id_parent: subscription has no parent"
+assert_dies fn { Azure::resource_id_parent("") }, "resource_id_parent: rejects an empty id"
+
 val $cs = Azure::parse_connection_string("DefaultEndpointsProtocol=https;AccountName=mystore;AccountKey=Zm9vYmF6==;EndpointSuffix=core.windows.net")
 assert_eq $cs->{pairs}{AccountName}, "mystore",        "parse_connection_string: account name"
 assert_eq $cs->{pairs}{AccountKey},  "Zm9vYmF6==",     "parse_connection_string: base64 key survives"

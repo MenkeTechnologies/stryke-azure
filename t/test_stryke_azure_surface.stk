@@ -124,6 +124,7 @@ assert_ok exists &Azure::Keys::decrypt, "Azure::Keys::decrypt exists"
 
 # ── pure parse/validate helpers ──
 assert_ok exists &Azure::parse_resource_id, "Azure::parse_resource_id exists"
+assert_ok exists &Azure::resource_id_parent, "Azure::resource_id_parent exists"
 assert_ok exists &Azure::build_resource_id, "Azure::build_resource_id exists"
 assert_ok exists &Azure::parse_connection_string, "Azure::parse_connection_string exists"
 assert_ok exists &Azure::build_connection_string, "Azure::build_connection_string exists"

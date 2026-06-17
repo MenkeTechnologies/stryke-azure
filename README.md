@@ -103,6 +103,7 @@ These open no client — credential-free string parsing/validation:
 
 ```stryke
 Azure::parse_resource_id($id)            # /subscriptions/.../providers/... → { subscription, resource_group, provider, types, resource_type, name }
+Azure::resource_id_parent($id)           # RBAC-scope "dirname" → { id, parent, has_parent }; resource→resource-group→subscription→root (providers/{ns} handled); subscription parent is ""
 Azure::build_resource_id(%opts)          # { subscription, resource_group, provider, types } → resource ID (canonical ARM casing); inverse of parse_resource_id
 Azure::parse_connection_string($cs)      # Key=Value;... → { pairs => { Key => Value } } (base64 AccountKey survives)
 Azure::build_connection_string(%pairs)   # { Key => Value } → Key=Value;... (byte-identical round-trip; inverse of parse_connection_string)

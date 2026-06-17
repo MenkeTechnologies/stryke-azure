@@ -819,6 +819,58 @@ fn op_parse_resource_id(opts: Value) -> Result<Value> {
     }))
 }
 
+/// The parent scope of an Azure resource ID — the RBAC-scope "dirname". The
+/// hierarchy is resource → resource-group scope → subscription scope → tenant
+/// root, with the `providers/{namespace}` marker handled correctly (it is not a
+/// collection/id pair). A nested resource drops its last `{type}/{name}` pair; a
+/// top-level resource under a provider collapses to the resource-group (or
+/// subscription) scope; a resource group's parent is its subscription; a
+/// subscription has an empty parent (`has_parent` false). opts: `id` (or
+/// `resource_id`, required). Returns `{id, parent, has_parent}`. Pure.
+fn op_resource_id_parent(opts: Value) -> Result<Value> {
+    let id = opts
+        .get("id")
+        .or_else(|| opts.get("resource_id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing id"))?;
+    let segs: Vec<&str> = id.split('/').filter(|s| !s.is_empty()).collect();
+    if segs.is_empty() {
+        return Err(anyhow!("empty resource id"));
+    }
+    let providers_idx = segs
+        .iter()
+        .position(|s| s.eq_ignore_ascii_case("providers"));
+    let parent_segs: &[&str] = match providers_idx {
+        Some(pi) => {
+            // After `providers/{namespace}` come `{type}/{name}` pairs.
+            let after = pi + 2;
+            let tail = segs.len().saturating_sub(after);
+            if tail <= 2 {
+                // A single (or partial) resource → the scope before `providers`.
+                &segs[..pi]
+            } else {
+                // A nested resource → drop the last type/name pair.
+                let drop = if tail.is_multiple_of(2) { 2 } else { 1 };
+                &segs[..segs.len() - drop]
+            }
+        }
+        // No provider: a resourceGroups/{rg} or subscriptions/{s} scope; drop the
+        // trailing key/value pair (rg → subscription, subscription → root).
+        None if segs.len() >= 2 => &segs[..segs.len() - 2],
+        None => &[],
+    };
+    let parent = if parent_segs.is_empty() {
+        String::new()
+    } else {
+        format!("/{}", parent_segs.join("/"))
+    };
+    Ok(json!({
+        "id": id,
+        "parent": parent,
+        "has_parent": !parent_segs.is_empty(),
+    }))
+}
+
 /// Assemble an Azure resource ID from parts, emitting canonical ARM casing
 /// (`/subscriptions/…/resourceGroups/…/providers/…/type/name…`). opts:
 /// subscription, resource_group, provider (all optional strings), and types — an
@@ -1528,6 +1580,11 @@ pub extern "C" fn azure__parse_resource_id(args: *const c_char) -> *const c_char
 }
 
 #[no_mangle]
+pub extern "C" fn azure__resource_id_parent(args: *const c_char) -> *const c_char {
+    ffi_call_async(args, |opts| async move { op_resource_id_parent(opts) })
+}
+
+#[no_mangle]
 pub extern "C" fn azure__build_resource_id(args: *const c_char) -> *const c_char {
     ffi_call_async(args, |opts| async move { op_build_resource_id(opts) })
 }
@@ -1824,6 +1881,43 @@ mod ffi_tests {
         // types without a provider is an error; empty input is an error.
         assert!(op_build_resource_id(json!({"types": [{"type": "x", "name": "y"}]})).is_err());
         assert!(op_build_resource_id(json!({})).is_err());
+    }
+
+    #[test]
+    fn resource_id_parent_walks_the_arm_scope_hierarchy() {
+        let parent = |id: &str| {
+            op_resource_id_parent(json!({ "id": id })).unwrap()["parent"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        // A top-level resource collapses to its resource-group scope.
+        assert_eq!(
+            parent("/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/acct"),
+            "/subscriptions/s/resourceGroups/rg"
+        );
+        // A nested (child) resource drops only its last type/name pair.
+        assert_eq!(
+            parent("/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/acct/blobServices/default"),
+            "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/acct"
+        );
+        // A resource group's parent is its subscription scope.
+        assert_eq!(
+            parent("/subscriptions/s/resourceGroups/rg"),
+            "/subscriptions/s"
+        );
+        // A subscription has no parent.
+        let sub = op_resource_id_parent(json!({"id": "/subscriptions/s"})).unwrap();
+        assert_eq!(sub["parent"], json!(""));
+        assert_eq!(sub["has_parent"], json!(false));
+        // `resource_id` alias; missing/empty args error.
+        assert_eq!(
+            op_resource_id_parent(json!({"resource_id": "/subscriptions/s/resourceGroups/rg"}))
+                .unwrap()["parent"],
+            json!("/subscriptions/s")
+        );
+        assert!(op_resource_id_parent(json!({"id": ""})).is_err());
+        assert!(op_resource_id_parent(json!({})).is_err());
     }
 
     #[test]
