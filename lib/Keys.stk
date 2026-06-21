@@ -16,3 +16,13 @@ fn Azure::Keys::encrypt ($key, $plaintext, %opts) {
 fn Azure::Keys::decrypt ($key, $version, $ciphertext, %opts) {
     Azure::keys_decrypt($key, $version, $ciphertext, %opts)
 }
+
+## List key identifiers in the vault — array of { kid } hashrefs.
+fn Azure::Keys::ls (%opts) {
+    Azure::keys_list(%opts)
+}
+
+## Get a key's public material by name. Returns { key, jwk, managed }.
+fn Azure::Keys::get ($key, %opts) {
+    Azure::keys_get($key, %opts)
+}

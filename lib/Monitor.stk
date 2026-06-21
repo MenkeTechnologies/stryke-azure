@@ -1,0 +1,16 @@
+## lib/Monitor.stk — `use Azure::Monitor`
+##
+## Azure Monitor metrics wrapper around `Azure::monitor_list_metrics`
+## (Azure Resource Manager REST), the Azure analog of AWS CloudWatch.
+## Metrics are read against a resource's full ARM id.
+
+package Azure::Monitor
+
+use Azure
+
+## List metrics for a resource by its full ARM $resource_id. opts: metrics
+## (comma-separated metric names), timespan (ISO 8601 interval). Returns the
+## metrics response hashref.
+fn Azure::Monitor::metrics ($resource_id, %opts) {
+    Azure::monitor_list_metrics($resource_id, %opts)
+}

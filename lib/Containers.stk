@@ -1,0 +1,32 @@
+## lib/Containers.stk — `use Azure::Containers`
+##
+## Container Instances (ACI) and Kubernetes Service (AKS) wrappers around
+## `Azure::container_groups_*` and `Azure::aks_*` (Azure Resource Manager
+## REST). The subscription comes from the `subscription =>` opt or
+## AZURE_SUBSCRIPTION_ID; per-resource gets take a `resource_group =>` opt.
+
+package Azure::Containers
+
+use Azure
+
+## List container groups (ACI) in the subscription, or in a `resource_group =>`
+## opt. Array of container-group hashrefs.
+fn Azure::Containers::groups (%opts) {
+    Azure::container_groups_list(%opts)
+}
+
+## Get a container group by name (`resource_group =>` opt). Returns the hashref.
+fn Azure::Containers::group ($name, %opts) {
+    Azure::container_group_get($name, %opts)
+}
+
+## List AKS managed clusters in the subscription, or in a `resource_group =>`
+## opt. Array of cluster hashrefs.
+fn Azure::Containers::clusters (%opts) {
+    Azure::aks_list(%opts)
+}
+
+## Get an AKS managed cluster by name (`resource_group =>` opt). Returns the hashref.
+fn Azure::Containers::cluster ($name, %opts) {
+    Azure::aks_get($name, %opts)
+}

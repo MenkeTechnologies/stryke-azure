@@ -20,6 +20,12 @@ use Azure::Queue
 use Azure::Cosmos
 use Azure::Secrets
 use Azure::Keys
+use Azure::ResourceGroups
+use Azure::Compute
+use Azure::Storage
+use Azure::ServiceBus
+use Azure::Monitor
+use Azure::Containers
 
 # ── Azure.stk: version + identity ───────────────────────────
 assert_ok exists &Azure::version, "Azure::version exists"
@@ -143,5 +149,65 @@ assert_ok exists &Azure::valid_cosmos_id, "Azure::valid_cosmos_id exists"
 assert_ok exists &Azure::valid_guid, "Azure::valid_guid exists"
 assert_ok exists &Azure::normalize_guid, "Azure::normalize_guid exists"
 assert_ok exists &Azure::format_guid, "Azure::format_guid exists"
+
+# ── Key Vault Keys (list/get) ──
+assert_ok exists &Azure::keys_list, "Azure::keys_list exists"
+assert_ok exists &Azure::keys_get, "Azure::keys_get exists"
+assert_ok exists &Azure::Keys::ls, "Azure::Keys::ls exists"
+assert_ok exists &Azure::Keys::get, "Azure::Keys::get exists"
+
+# ── Resource Groups ──
+assert_ok exists &Azure::resource_groups_list, "Azure::resource_groups_list exists"
+assert_ok exists &Azure::resource_group_get, "Azure::resource_group_get exists"
+assert_ok exists &Azure::resource_group_create, "Azure::resource_group_create exists"
+assert_ok exists &Azure::resource_group_delete, "Azure::resource_group_delete exists"
+assert_ok exists &Azure::ResourceGroups::ls, "Azure::ResourceGroups::ls exists"
+assert_ok exists &Azure::ResourceGroups::get, "Azure::ResourceGroups::get exists"
+assert_ok exists &Azure::ResourceGroups::create, "Azure::ResourceGroups::create exists"
+assert_ok exists &Azure::ResourceGroups::rm, "Azure::ResourceGroups::rm exists"
+
+# ── Compute / Virtual Machines ──
+assert_ok exists &Azure::vm_list, "Azure::vm_list exists"
+assert_ok exists &Azure::vm_get, "Azure::vm_get exists"
+assert_ok exists &Azure::vm_start, "Azure::vm_start exists"
+assert_ok exists &Azure::vm_stop, "Azure::vm_stop exists"
+assert_ok exists &Azure::vm_deallocate, "Azure::vm_deallocate exists"
+assert_ok exists &Azure::vm_restart, "Azure::vm_restart exists"
+assert_ok exists &Azure::Compute::ls, "Azure::Compute::ls exists"
+assert_ok exists &Azure::Compute::get, "Azure::Compute::get exists"
+assert_ok exists &Azure::Compute::start, "Azure::Compute::start exists"
+assert_ok exists &Azure::Compute::stop, "Azure::Compute::stop exists"
+assert_ok exists &Azure::Compute::deallocate, "Azure::Compute::deallocate exists"
+assert_ok exists &Azure::Compute::restart, "Azure::Compute::restart exists"
+
+# ── Storage Accounts (management) ──
+assert_ok exists &Azure::storage_accounts_list, "Azure::storage_accounts_list exists"
+assert_ok exists &Azure::storage_account_get, "Azure::storage_account_get exists"
+assert_ok exists &Azure::storage_account_list_keys, "Azure::storage_account_list_keys exists"
+assert_ok exists &Azure::Storage::ls, "Azure::Storage::ls exists"
+assert_ok exists &Azure::Storage::get, "Azure::Storage::get exists"
+assert_ok exists &Azure::Storage::keys, "Azure::Storage::keys exists"
+
+# ── Service Bus ──
+assert_ok exists &Azure::servicebus_list_queues, "Azure::servicebus_list_queues exists"
+assert_ok exists &Azure::servicebus_send_message, "Azure::servicebus_send_message exists"
+assert_ok exists &Azure::servicebus_receive_message, "Azure::servicebus_receive_message exists"
+assert_ok exists &Azure::ServiceBus::queues, "Azure::ServiceBus::queues exists"
+assert_ok exists &Azure::ServiceBus::send, "Azure::ServiceBus::send exists"
+assert_ok exists &Azure::ServiceBus::receive, "Azure::ServiceBus::receive exists"
+
+# ── Monitor ──
+assert_ok exists &Azure::monitor_list_metrics, "Azure::monitor_list_metrics exists"
+assert_ok exists &Azure::Monitor::metrics, "Azure::Monitor::metrics exists"
+
+# ── Container Instances + AKS ──
+assert_ok exists &Azure::container_groups_list, "Azure::container_groups_list exists"
+assert_ok exists &Azure::container_group_get, "Azure::container_group_get exists"
+assert_ok exists &Azure::aks_list, "Azure::aks_list exists"
+assert_ok exists &Azure::aks_get, "Azure::aks_get exists"
+assert_ok exists &Azure::Containers::groups, "Azure::Containers::groups exists"
+assert_ok exists &Azure::Containers::group, "Azure::Containers::group exists"
+assert_ok exists &Azure::Containers::clusters, "Azure::Containers::clusters exists"
+assert_ok exists &Azure::Containers::cluster, "Azure::Containers::cluster exists"
 
 test_run

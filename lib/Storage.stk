@@ -1,0 +1,29 @@
+## lib/Storage.stk — `use Azure::Storage`
+##
+## Storage-account management wrappers around `Azure::storage_account*`
+## (Azure Resource Manager REST). This is the management plane — listing
+## accounts, reading account properties, and fetching access keys —
+## distinct from the data-plane Blob/Queue packages. The subscription
+## comes from the `subscription =>` opt or AZURE_SUBSCRIPTION_ID;
+## per-account ops take a `resource_group =>` opt.
+
+package Azure::Storage
+
+use Azure
+
+## List storage accounts in the subscription, or in a `resource_group =>` opt.
+## Array of account hashrefs.
+fn Azure::Storage::ls (%opts) {
+    Azure::storage_accounts_list(%opts)
+}
+
+## Get a storage account by name (`resource_group =>` opt). Returns the hashref.
+fn Azure::Storage::get ($account, %opts) {
+    Azure::storage_account_get($account, %opts)
+}
+
+## List a storage account's access keys (`resource_group =>` opt). Returns the
+## listKeys response hashref ({ keys => [...] }).
+fn Azure::Storage::keys ($account, %opts) {
+    Azure::storage_account_list_keys($account, %opts)
+}

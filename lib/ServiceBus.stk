@@ -1,0 +1,28 @@
+## lib/ServiceBus.stk — `use Azure::ServiceBus`
+##
+## Service Bus wrappers around `Azure::servicebus_*`, the Azure analog of
+## AWS SNS/SQS for enterprise messaging. Queue listing is a management-
+## plane call (`namespace =>`, `resource_group =>`, `subscription =>`);
+## send/receive are data-plane REST calls against the namespace endpoint.
+## Receive is destructive (receive-and-delete).
+
+package Azure::ServiceBus
+
+use Azure
+
+## List queues in a Service Bus $namespace (`resource_group =>` opt). Array of
+## queue hashrefs.
+fn Azure::ServiceBus::queues ($namespace, %opts) {
+    Azure::servicebus_list_queues($namespace, %opts)
+}
+
+## Send $body to $queue in $namespace. Returns 1 on success.
+fn Azure::ServiceBus::send ($namespace, $queue, $body, %opts) {
+    Azure::servicebus_send_message($namespace, $queue, $body, %opts)
+}
+
+## Receive (and delete) one message from $queue in $namespace. Returns the
+## message body string, or undef if the queue was empty.
+fn Azure::ServiceBus::receive ($namespace, $queue, %opts) {
+    Azure::servicebus_receive_message($namespace, $queue, %opts)
+}

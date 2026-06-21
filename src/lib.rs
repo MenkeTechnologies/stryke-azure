@@ -60,6 +60,111 @@ fn cred() -> Result<Arc<dyn TokenCredential>> {
     .map(Arc::clone)
 }
 
+// ── Azure Resource Manager (ARM) REST helper ─────────────────────────────────
+//
+// The management plane (Resource Groups, Compute, Storage Accounts, Service Bus,
+// Monitor, Container Instances, AKS) has no GA typed Rust SDK crate. Rather than
+// introduce a second auth/runtime pattern, these ops reuse the package's existing
+// primitives: the shared `cred()` token (exactly as `op_identity_token` does) and
+// azure_core's own HTTP client (`new_http_client`, the same reqwest-backed stack
+// the typed service clients use under the hood). One bearer token is acquired per
+// call against the ARM scope; the response body is parsed as JSON.
+
+static HTTP: OnceCell<Arc<dyn azure_core::http::HttpClient>> = OnceCell::new();
+
+/// One shared azure_core HTTP client, reused across every ARM REST call.
+fn http() -> Arc<dyn azure_core::http::HttpClient> {
+    HTTP.get_or_init(|| azure_core::http::new_http_client(None))
+        .clone()
+}
+
+/// The ARM scope an Entra access token must carry for management-plane calls.
+const ARM_SCOPE: &str = "https://management.azure.com/.default";
+
+/// The ARM base endpoint. Sovereign clouds use a different host; callers can
+/// override per request with an `arm_endpoint` opt.
+fn arm_base(opts: &Value) -> &str {
+    opt_str(opts, "arm_endpoint").unwrap_or("https://management.azure.com")
+}
+
+/// The subscription id from the `subscription` opt or `AZURE_SUBSCRIPTION_ID`.
+fn subscription_id(opts: &Value) -> Result<String> {
+    opt_str(opts, "subscription")
+        .map(String::from)
+        .or_else(|| std::env::var("AZURE_SUBSCRIPTION_ID").ok())
+        .ok_or_else(|| anyhow!("missing subscription (or set AZURE_SUBSCRIPTION_ID)"))
+}
+
+/// A required `resource_group` opt.
+fn resource_group(opts: &Value) -> Result<String> {
+    req_str(opts, "resource_group").map(String::from)
+}
+
+/// Issue an authenticated ARM REST request and parse the JSON body.
+///
+/// `path` is the ARM resource path beginning after the host (it must include the
+/// leading `/subscriptions/...` and the `?api-version=` query). `body` is an
+/// optional JSON request body (sent with `content-type: application/json`). A
+/// non-success status surfaces the response body verbatim as an error, mirroring
+/// the typed clients' behavior. An empty body (HTTP 202/204) yields `null`.
+async fn arm_request(
+    opts: &Value,
+    method: azure_core::http::Method,
+    path: &str,
+    body: Option<Value>,
+) -> Result<Value> {
+    use azure_core::http::{Request, Url};
+    let tok = cred()?
+        .get_token(&[ARM_SCOPE], None)
+        .await
+        .map_err(|e| anyhow!("get_token: {e}"))?;
+    let url = Url::parse(&format!("{}{path}", arm_base(opts)))?;
+    let mut req = Request::new(url, method);
+    req.insert_header("authorization", format!("Bearer {}", tok.token.secret()));
+    req.insert_header("accept", "application/json");
+    if let Some(b) = body {
+        req.insert_header("content-type", "application/json");
+        req.set_body(serde_json::to_vec(&b)?);
+    }
+    let resp = http()
+        .execute_request(&req)
+        .await
+        .map_err(|e| anyhow!("arm request: {e}"))?;
+    let status = resp.status();
+    let bytes = resp.into_body().collect().await?;
+    if !status.is_success() {
+        let msg = String::from_utf8_lossy(bytes.as_ref());
+        return Err(anyhow!("ARM {status}: {msg}"));
+    }
+    if bytes.is_empty() {
+        return Ok(Value::Null);
+    }
+    Ok(serde_json::from_slice(bytes.as_ref())?)
+}
+
+/// Collect an ARM list response, following `nextLink` pagination. ARM list
+/// payloads are `{ "value": [...], "nextLink": "<url>" }`; this flattens every
+/// page's `value` into one array. `path` is the first page's ARM path.
+async fn arm_list(opts: &Value, path: &str) -> Result<Vec<Value>> {
+    use azure_core::http::Method;
+    let mut out = Vec::new();
+    let mut next: Option<String> = Some(format!("{}{path}", arm_base(opts)));
+    while let Some(url) = next.take() {
+        // After the first page, `nextLink` is an absolute URL; strip the base so
+        // arm_request can re-prepend it uniformly.
+        let path = url.strip_prefix(arm_base(opts)).unwrap_or(&url);
+        let page = arm_request(opts, Method::Get, path, None).await?;
+        if let Some(items) = page.get("value").and_then(Value::as_array) {
+            out.extend(items.iter().cloned());
+        }
+        next = page
+            .get("nextLink")
+            .and_then(Value::as_str)
+            .map(String::from);
+    }
+    Ok(out)
+}
+
 // ── option / endpoint helpers ────────────────────────────────────────────────
 
 fn opt_str<'a>(opts: &'a Value, key: &str) -> Option<&'a str> {
@@ -714,6 +819,328 @@ async fn op_keys_decrypt(opts: Value) -> Result<Value> {
         )),
     });
     Ok(json!({ "key": key, "plaintext": plaintext }))
+}
+
+async fn op_keys_list(opts: Value) -> Result<Value> {
+    let client = key_client(&opts)?;
+    let mut pager = client.list_key_properties(None)?;
+    let mut out = Vec::new();
+    while let Some(p) = pager.try_next().await? {
+        out.push(json!({ "kid": p.kid }));
+    }
+    Ok(json!({ "keys": out }))
+}
+
+async fn op_keys_get(opts: Value) -> Result<Value> {
+    let client = key_client(&opts)?;
+    let name = req_str(&opts, "key")?;
+    let key = client.get_key(name, None).await?.into_model()?;
+    // `key.key` is the JSON Web Key (kid, kty, key ops, public material).
+    Ok(json!({
+        "key": name,
+        "jwk": serde_json::to_value(&key.key).unwrap_or(Value::Null),
+        "managed": key.managed,
+    }))
+}
+
+// ── Resource Groups (ARM) ────────────────────────────────────────────────────
+
+async fn op_resource_groups_list(opts: Value) -> Result<Value> {
+    let sub = subscription_id(&opts)?;
+    let path = format!("/subscriptions/{sub}/resourcegroups?api-version=2021-04-01");
+    let groups = arm_list(&opts, &path).await?;
+    Ok(json!({ "resource_groups": groups }))
+}
+
+async fn op_resource_group_get(opts: Value) -> Result<Value> {
+    use azure_core::http::Method;
+    let sub = subscription_id(&opts)?;
+    let rg = resource_group(&opts)?;
+    let path = format!("/subscriptions/{sub}/resourcegroups/{rg}?api-version=2021-04-01");
+    arm_request(&opts, Method::Get, &path, None).await
+}
+
+async fn op_resource_group_create(opts: Value) -> Result<Value> {
+    use azure_core::http::Method;
+    let sub = subscription_id(&opts)?;
+    let rg = resource_group(&opts)?;
+    let location = req_str(&opts, "location")?;
+    let body = json!({ "location": location });
+    let path = format!("/subscriptions/{sub}/resourcegroups/{rg}?api-version=2021-04-01");
+    arm_request(&opts, Method::Put, &path, Some(body)).await
+}
+
+async fn op_resource_group_delete(opts: Value) -> Result<Value> {
+    use azure_core::http::Method;
+    let sub = subscription_id(&opts)?;
+    let rg = resource_group(&opts)?;
+    // Delete is a long-running operation; ARM answers 202 with no body.
+    let path = format!("/subscriptions/{sub}/resourcegroups/{rg}?api-version=2021-04-01");
+    arm_request(&opts, Method::Delete, &path, None).await?;
+    Ok(json!({ "resource_group": rg, "deleting": true }))
+}
+
+// ── Compute / Virtual Machines (ARM) ─────────────────────────────────────────
+
+/// The ARM path prefix for a VM action under `{provider}/virtualMachines/{vm}`.
+fn vm_path(opts: &Value, suffix: &str) -> Result<String> {
+    let sub = subscription_id(opts)?;
+    let rg = resource_group(opts)?;
+    let vm = req_str(opts, "vm")?;
+    Ok(format!(
+        "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines/{vm}{suffix}"
+    ))
+}
+
+async fn op_vm_list(opts: Value) -> Result<Value> {
+    let sub = subscription_id(&opts)?;
+    // A resource_group scopes the list; absent, list across the subscription.
+    let path = match opt_str(&opts, "resource_group") {
+        Some(rg) => format!(
+            "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01"
+        ),
+        None => format!(
+            "/subscriptions/{sub}/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01"
+        ),
+    };
+    let vms = arm_list(&opts, &path).await?;
+    Ok(json!({ "vms": vms }))
+}
+
+async fn op_vm_get(opts: Value) -> Result<Value> {
+    use azure_core::http::Method;
+    let path = format!("{}?api-version=2024-07-01", vm_path(&opts, "")?);
+    arm_request(&opts, Method::Get, &path, None).await
+}
+
+/// Run a VM power action (start/powerOff/deallocate/restart). These are
+/// long-running POSTs; ARM returns 202 with no body.
+async fn vm_action(opts: &Value, action: &str) -> Result<Value> {
+    use azure_core::http::Method;
+    let vm = req_str(opts, "vm")?.to_string();
+    let path = format!(
+        "{}?api-version=2024-07-01",
+        vm_path(opts, &format!("/{action}"))?
+    );
+    arm_request(opts, Method::Post, &path, None).await?;
+    Ok(json!({ "vm": vm, "action": action, "accepted": true }))
+}
+
+async fn op_vm_start(opts: Value) -> Result<Value> {
+    vm_action(&opts, "start").await
+}
+
+async fn op_vm_stop(opts: Value) -> Result<Value> {
+    // `powerOff` stops the VM but keeps it allocated (still billed) — the ARM
+    // analog of an OS shutdown, distinct from `deallocate`.
+    vm_action(&opts, "powerOff").await
+}
+
+async fn op_vm_deallocate(opts: Value) -> Result<Value> {
+    vm_action(&opts, "deallocate").await
+}
+
+async fn op_vm_restart(opts: Value) -> Result<Value> {
+    vm_action(&opts, "restart").await
+}
+
+// ── Storage Accounts (ARM management plane) ──────────────────────────────────
+
+async fn op_storage_accounts_list(opts: Value) -> Result<Value> {
+    let sub = subscription_id(&opts)?;
+    let path = match opt_str(&opts, "resource_group") {
+        Some(rg) => format!(
+            "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Storage/storageAccounts?api-version=2023-05-01"
+        ),
+        None => format!(
+            "/subscriptions/{sub}/providers/Microsoft.Storage/storageAccounts?api-version=2023-05-01"
+        ),
+    };
+    let accounts = arm_list(&opts, &path).await?;
+    Ok(json!({ "storage_accounts": accounts }))
+}
+
+async fn op_storage_account_get(opts: Value) -> Result<Value> {
+    use azure_core::http::Method;
+    let sub = subscription_id(&opts)?;
+    let rg = resource_group(&opts)?;
+    let name = req_str(&opts, "account")?;
+    let path = format!(
+        "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Storage/storageAccounts/{name}?api-version=2023-05-01"
+    );
+    arm_request(&opts, Method::Get, &path, None).await
+}
+
+async fn op_storage_account_list_keys(opts: Value) -> Result<Value> {
+    use azure_core::http::Method;
+    let sub = subscription_id(&opts)?;
+    let rg = resource_group(&opts)?;
+    let name = req_str(&opts, "account")?;
+    let path = format!(
+        "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Storage/storageAccounts/{name}/listKeys?api-version=2023-05-01"
+    );
+    arm_request(&opts, Method::Post, &path, None).await
+}
+
+// ── Service Bus (ARM management + data plane) ────────────────────────────────
+
+async fn op_servicebus_list_queues(opts: Value) -> Result<Value> {
+    let sub = subscription_id(&opts)?;
+    let rg = resource_group(&opts)?;
+    let namespace = req_str(&opts, "namespace")?;
+    let path = format!(
+        "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ServiceBus/namespaces/{namespace}/queues?api-version=2021-11-01"
+    );
+    let queues = arm_list(&opts, &path).await?;
+    Ok(json!({ "queues": queues }))
+}
+
+/// The Service Bus data-plane base for a namespace. Sovereign clouds differ;
+/// callers can override with a `sb_endpoint` opt.
+fn servicebus_base(opts: &Value) -> Result<String> {
+    if let Some(e) = opt_str(opts, "sb_endpoint") {
+        return Ok(e.trim_end_matches('/').to_string());
+    }
+    let namespace = req_str(opts, "namespace")?;
+    Ok(format!("https://{namespace}.servicebus.windows.net"))
+}
+
+/// Acquire a Service Bus data-plane token (its own resource scope, distinct from
+/// the ARM scope) and issue an authenticated REST request.
+async fn servicebus_request(
+    method: azure_core::http::Method,
+    url: &str,
+    body: Option<Vec<u8>>,
+) -> Result<azure_core::http::AsyncRawResponse> {
+    use azure_core::http::{Request, Url};
+    let tok = cred()?
+        .get_token(&["https://servicebus.azure.net/.default"], None)
+        .await
+        .map_err(|e| anyhow!("get_token: {e}"))?;
+    let mut req = Request::new(Url::parse(url)?, method);
+    req.insert_header("authorization", format!("Bearer {}", tok.token.secret()));
+    if let Some(b) = body {
+        req.insert_header("content-type", "application/json");
+        req.set_body(b);
+    }
+    http()
+        .execute_request(&req)
+        .await
+        .map_err(|e| anyhow!("servicebus request: {e}"))
+}
+
+async fn op_servicebus_send_message(opts: Value) -> Result<Value> {
+    use azure_core::http::Method;
+    let queue = req_str(&opts, "queue")?.to_string();
+    let body = req_str(&opts, "body")?.as_bytes().to_vec();
+    let url = format!("{}/{queue}/messages", servicebus_base(&opts)?);
+    let resp = servicebus_request(Method::Post, &url, Some(body)).await?;
+    let status = resp.status();
+    let bytes = resp.into_body().collect().await?;
+    if !status.is_success() {
+        return Err(anyhow!(
+            "Service Bus send {status}: {}",
+            String::from_utf8_lossy(bytes.as_ref())
+        ));
+    }
+    Ok(json!({ "queue": queue, "sent": true }))
+}
+
+async fn op_servicebus_receive_message(opts: Value) -> Result<Value> {
+    use azure_core::http::Method;
+    let queue = req_str(&opts, "queue")?.to_string();
+    // Destructive read (receive-and-delete) via the `head` message endpoint.
+    let url = format!("{}/{queue}/messages/head", servicebus_base(&opts)?);
+    let resp = servicebus_request(Method::Delete, &url, None).await?;
+    let status = resp.status();
+    if status == azure_core::http::StatusCode::NoContent {
+        // 204 No Content — the queue was empty.
+        return Ok(json!({ "queue": queue, "message": Value::Null }));
+    }
+    let bytes = resp.into_body().collect().await?;
+    if !status.is_success() {
+        return Err(anyhow!(
+            "Service Bus receive {status}: {}",
+            String::from_utf8_lossy(bytes.as_ref())
+        ));
+    }
+    let body = String::from_utf8_lossy(bytes.as_ref()).to_string();
+    Ok(json!({ "queue": queue, "message": body }))
+}
+
+// ── Monitor (ARM) ────────────────────────────────────────────────────────────
+
+async fn op_monitor_list_metrics(opts: Value) -> Result<Value> {
+    use azure_core::http::Method;
+    // `resource_id` is the full ARM id of the resource to read metrics for.
+    let resource_id = req_str(&opts, "resource_id")?;
+    let metricnames = opt_str(&opts, "metrics");
+    let timespan = opt_str(&opts, "timespan");
+    let mut path = format!(
+        "{}/providers/Microsoft.Insights/metrics?api-version=2024-02-01",
+        resource_id.trim_end_matches('/')
+    );
+    if let Some(m) = metricnames {
+        path.push_str("&metricnames=");
+        path.push_str(m);
+    }
+    if let Some(t) = timespan {
+        path.push_str("&timespan=");
+        path.push_str(t);
+    }
+    arm_request(&opts, Method::Get, &path, None).await
+}
+
+// ── Container Instances + AKS (ARM) ──────────────────────────────────────────
+
+async fn op_container_groups_list(opts: Value) -> Result<Value> {
+    let sub = subscription_id(&opts)?;
+    let path = match opt_str(&opts, "resource_group") {
+        Some(rg) => format!(
+            "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ContainerInstance/containerGroups?api-version=2023-05-01"
+        ),
+        None => format!(
+            "/subscriptions/{sub}/providers/Microsoft.ContainerInstance/containerGroups?api-version=2023-05-01"
+        ),
+    };
+    let groups = arm_list(&opts, &path).await?;
+    Ok(json!({ "container_groups": groups }))
+}
+
+async fn op_container_group_get(opts: Value) -> Result<Value> {
+    use azure_core::http::Method;
+    let sub = subscription_id(&opts)?;
+    let rg = resource_group(&opts)?;
+    let name = req_str(&opts, "name")?;
+    let path = format!(
+        "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ContainerInstance/containerGroups/{name}?api-version=2023-05-01"
+    );
+    arm_request(&opts, Method::Get, &path, None).await
+}
+
+async fn op_aks_list(opts: Value) -> Result<Value> {
+    let sub = subscription_id(&opts)?;
+    let path = match opt_str(&opts, "resource_group") {
+        Some(rg) => format!(
+            "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ContainerService/managedClusters?api-version=2024-05-01"
+        ),
+        None => format!(
+            "/subscriptions/{sub}/providers/Microsoft.ContainerService/managedClusters?api-version=2024-05-01"
+        ),
+    };
+    let clusters = arm_list(&opts, &path).await?;
+    Ok(json!({ "clusters": clusters }))
+}
+
+async fn op_aks_get(opts: Value) -> Result<Value> {
+    use azure_core::http::Method;
+    let sub = subscription_id(&opts)?;
+    let rg = resource_group(&opts)?;
+    let name = req_str(&opts, "name")?;
+    let path = format!(
+        "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ContainerService/managedClusters/{name}?api-version=2024-05-01"
+    );
+    arm_request(&opts, Method::Get, &path, None).await
 }
 
 // ── FFI plumbing ─────────────────────────────────────────────────────────────
@@ -1573,6 +2000,41 @@ export!(azure__secrets_backup, op_secrets_backup);
 
 export!(azure__keys_encrypt, op_keys_encrypt);
 export!(azure__keys_decrypt, op_keys_decrypt);
+export!(azure__keys_list, op_keys_list);
+export!(azure__keys_get, op_keys_get);
+
+export!(azure__resource_groups_list, op_resource_groups_list);
+export!(azure__resource_group_get, op_resource_group_get);
+export!(azure__resource_group_create, op_resource_group_create);
+export!(azure__resource_group_delete, op_resource_group_delete);
+
+export!(azure__vm_list, op_vm_list);
+export!(azure__vm_get, op_vm_get);
+export!(azure__vm_start, op_vm_start);
+export!(azure__vm_stop, op_vm_stop);
+export!(azure__vm_deallocate, op_vm_deallocate);
+export!(azure__vm_restart, op_vm_restart);
+
+export!(azure__storage_accounts_list, op_storage_accounts_list);
+export!(azure__storage_account_get, op_storage_account_get);
+export!(
+    azure__storage_account_list_keys,
+    op_storage_account_list_keys
+);
+
+export!(azure__servicebus_list_queues, op_servicebus_list_queues);
+export!(azure__servicebus_send_message, op_servicebus_send_message);
+export!(
+    azure__servicebus_receive_message,
+    op_servicebus_receive_message
+);
+
+export!(azure__monitor_list_metrics, op_monitor_list_metrics);
+
+export!(azure__container_groups_list, op_container_groups_list);
+export!(azure__container_group_get, op_container_group_get);
+export!(azure__aks_list, op_aks_list);
+export!(azure__aks_get, op_aks_get);
 
 #[no_mangle]
 pub extern "C" fn azure__parse_resource_id(args: *const c_char) -> *const c_char {
@@ -1734,6 +2196,59 @@ mod endpoint_tests {
         // No `account` arg and (in CI) no env var → a clear error, not a panic.
         std::env::remove_var("AZURE_STORAGE_ACCOUNT");
         assert!(blob_service_url(&json!({})).is_err());
+    }
+
+    #[test]
+    fn arm_base_default_and_override() {
+        assert_eq!(arm_base(&json!({})), "https://management.azure.com");
+        assert_eq!(
+            arm_base(&json!({ "arm_endpoint": "https://management.usgovcloudapi.net" })),
+            "https://management.usgovcloudapi.net"
+        );
+    }
+
+    #[test]
+    fn subscription_id_from_opt_then_env() {
+        // Explicit opt wins regardless of the env var.
+        std::env::remove_var("AZURE_SUBSCRIPTION_ID");
+        assert_eq!(
+            subscription_id(&json!({ "subscription": "sub-1" })).unwrap(),
+            "sub-1"
+        );
+        // No opt, no env → a clear error, not a panic.
+        assert!(subscription_id(&json!({})).is_err());
+    }
+
+    #[test]
+    fn vm_path_builds_canonical_arm_path() {
+        let opts = json!({ "subscription": "s", "resource_group": "rg", "vm": "web1" });
+        assert_eq!(
+            vm_path(&opts, "").unwrap(),
+            "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/web1"
+        );
+        assert_eq!(
+            vm_path(&opts, "/start").unwrap(),
+            "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/web1/start"
+        );
+        // A missing vm/resource_group/subscription errors rather than emitting a
+        // malformed path.
+        assert!(vm_path(&json!({ "subscription": "s", "resource_group": "rg" }), "").is_err());
+        assert!(vm_path(&json!({ "vm": "web1" }), "").is_err());
+    }
+
+    #[test]
+    fn servicebus_base_from_namespace_and_override() {
+        assert_eq!(
+            servicebus_base(&json!({ "namespace": "myns" })).unwrap(),
+            "https://myns.servicebus.windows.net"
+        );
+        // An explicit endpoint wins and its trailing slash is trimmed.
+        assert_eq!(
+            servicebus_base(&json!({ "sb_endpoint": "https://x.servicebus.windows.net/" }))
+                .unwrap(),
+            "https://x.servicebus.windows.net"
+        );
+        assert!(servicebus_base(&json!({})).is_err());
     }
 }
 

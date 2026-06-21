@@ -321,6 +321,179 @@ fn Azure::keys_decrypt ($key, $version, $ciphertext, %opts) {
     Azure::_decode("keys_decrypt", azure__keys_decrypt(to_json($r)))->{plaintext}
 }
 
+## List key identifiers in the vault. Returns a list of { kid } hashrefs.
+fn Azure::keys_list (%opts) {
+    @{ Azure::_decode("keys_list",
+        azure__keys_list(to_json(Azure::_req({}, \%opts))))->{keys} }
+}
+
+## Get a key's public material by name. Returns { key, jwk, managed } where jwk
+## is the JSON Web Key (kid, kty, key ops, public components).
+fn Azure::keys_get ($key, %opts) {
+    val $r = Azure::_req({ key => $key }, \%opts)
+    Azure::_decode("keys_get", azure__keys_get(to_json($r)))
+}
+
+# ── Azure Resource Manager helpers ───────────────────────────────────
+# The management-plane ops (Resource Groups, Compute, Storage Accounts,
+# Service Bus, Monitor, Container Instances, AKS) reach ARM via REST using
+# the same shared Entra credential. They take a subscription from the
+# `subscription =>` opt (or AZURE_SUBSCRIPTION_ID) and, where scoped, a
+# `resource_group =>` opt.
+
+## Merge management opts (subscription/resource_group/arm_endpoint) into a request.
+fn Azure::_arm_req ($extra, $opts) {
+    var %r = %$extra
+    for val $k (qw(subscription resource_group arm_endpoint)) {
+        $r{$k} = $opts->{$k} if exists $opts->{$k} && defined $opts->{$k}
+    }
+    \%r
+}
+
+# ── Resource Groups ──────────────────────────────────────────────────
+
+## List resource groups in the subscription. Returns a list of group hashrefs.
+fn Azure::resource_groups_list (%opts) {
+    @{ Azure::_decode("resource_groups_list",
+        azure__resource_groups_list(to_json(Azure::_arm_req({}, \%opts))))->{resource_groups} }
+}
+
+## Get a resource group by name (`resource_group =>` opt). Returns the hashref.
+fn Azure::resource_group_get (%opts) {
+    Azure::_decode("resource_group_get",
+        azure__resource_group_get(to_json(Azure::_arm_req({}, \%opts))))
+}
+
+## Create/update a resource group. opts: resource_group, location (required).
+## Returns the group hashref.
+fn Azure::resource_group_create ($resource_group, $location, %opts) {
+    val $r = Azure::_arm_req({ resource_group => $resource_group, location => $location }, \%opts)
+    Azure::_decode("resource_group_create", azure__resource_group_create(to_json($r)))
+}
+
+## Delete a resource group (long-running). Returns { resource_group, deleting }.
+fn Azure::resource_group_delete ($resource_group, %opts) {
+    val $r = Azure::_arm_req({ resource_group => $resource_group }, \%opts)
+    Azure::_decode("resource_group_delete", azure__resource_group_delete(to_json($r)))
+}
+
+# ── Compute / Virtual Machines ───────────────────────────────────────
+
+## List VMs in the subscription, or in a `resource_group =>` opt if given.
+## Returns a list of VM hashrefs.
+fn Azure::vm_list (%opts) {
+    @{ Azure::_decode("vm_list",
+        azure__vm_list(to_json(Azure::_arm_req({}, \%opts))))->{vms} }
+}
+
+## Get a VM by name (`vm =>`, `resource_group =>` opts). Returns the hashref.
+fn Azure::vm_get ($vm, %opts) {
+    val $r = Azure::_arm_req({ vm => $vm }, \%opts)
+    Azure::_decode("vm_get", azure__vm_get(to_json($r)))
+}
+
+## Start a VM (long-running). Returns { vm, action, accepted }.
+fn Azure::vm_start ($vm, %opts) {
+    Azure::_decode("vm_start", azure__vm_start(to_json(Azure::_arm_req({ vm => $vm }, \%opts))))
+}
+
+## Power off a VM but keep it allocated (still billed). Returns { vm, action, accepted }.
+fn Azure::vm_stop ($vm, %opts) {
+    Azure::_decode("vm_stop", azure__vm_stop(to_json(Azure::_arm_req({ vm => $vm }, \%opts))))
+}
+
+## Deallocate a VM (stop and release compute, no compute charge). Returns the hashref.
+fn Azure::vm_deallocate ($vm, %opts) {
+    Azure::_decode("vm_deallocate", azure__vm_deallocate(to_json(Azure::_arm_req({ vm => $vm }, \%opts))))
+}
+
+## Restart a VM (long-running). Returns { vm, action, accepted }.
+fn Azure::vm_restart ($vm, %opts) {
+    Azure::_decode("vm_restart", azure__vm_restart(to_json(Azure::_arm_req({ vm => $vm }, \%opts))))
+}
+
+# ── Storage Accounts (management plane) ───────────────────────────────
+
+## List storage accounts in the subscription, or in a `resource_group =>` opt.
+## Returns a list of account hashrefs.
+fn Azure::storage_accounts_list (%opts) {
+    @{ Azure::_decode("storage_accounts_list",
+        azure__storage_accounts_list(to_json(Azure::_arm_req({}, \%opts))))->{storage_accounts} }
+}
+
+## Get a storage account by name (`account =>`, `resource_group =>` opts).
+fn Azure::storage_account_get ($account, %opts) {
+    val $r = Azure::_arm_req({ account => $account }, \%opts)
+    Azure::_decode("storage_account_get", azure__storage_account_get(to_json($r)))
+}
+
+## List a storage account's access keys (`account =>`, `resource_group =>` opts).
+## Returns the listKeys response hashref ({ keys => [...] }).
+fn Azure::storage_account_list_keys ($account, %opts) {
+    val $r = Azure::_arm_req({ account => $account }, \%opts)
+    Azure::_decode("storage_account_list_keys", azure__storage_account_list_keys(to_json($r)))
+}
+
+# ── Service Bus ──────────────────────────────────────────────────────
+
+## List Service Bus queues in a namespace (`namespace =>`, `resource_group =>`
+## opts). Returns a list of queue hashrefs.
+fn Azure::servicebus_list_queues ($namespace, %opts) {
+    val $r = Azure::_arm_req({ namespace => $namespace }, \%opts)
+    @{ Azure::_decode("servicebus_list_queues", azure__servicebus_list_queues(to_json($r)))->{queues} }
+}
+
+## Send $body to Service Bus $queue in $namespace. Returns 1 on success.
+fn Azure::servicebus_send_message ($namespace, $queue, $body, %opts) {
+    val $r = Azure::_arm_req({ namespace => $namespace, queue => $queue, body => $body }, \%opts)
+    Azure::_decode("servicebus_send_message", azure__servicebus_send_message(to_json($r)))->{sent} ? 1 : 0
+}
+
+## Receive (and delete) one message from Service Bus $queue. Returns the message
+## body string, or undef if the queue was empty.
+fn Azure::servicebus_receive_message ($namespace, $queue, %opts) {
+    val $r = Azure::_arm_req({ namespace => $namespace, queue => $queue }, \%opts)
+    Azure::_decode("servicebus_receive_message", azure__servicebus_receive_message(to_json($r)))->{message}
+}
+
+# ── Monitor ──────────────────────────────────────────────────────────
+
+## List metrics for a resource. opts: resource_id (full ARM id, required),
+## metrics (comma-separated names), timespan. Returns the metrics response hashref.
+fn Azure::monitor_list_metrics ($resource_id, %opts) {
+    val $r = Azure::_arm_req(
+        { resource_id => $resource_id, metrics => $opts{metrics}, timespan => $opts{timespan} }, \%opts)
+    Azure::_decode("monitor_list_metrics", azure__monitor_list_metrics(to_json($r)))
+}
+
+# ── Container Instances + AKS ────────────────────────────────────────
+
+## List container groups (ACI) in the subscription, or in a `resource_group =>`
+## opt. Returns a list of container-group hashrefs.
+fn Azure::container_groups_list (%opts) {
+    @{ Azure::_decode("container_groups_list",
+        azure__container_groups_list(to_json(Azure::_arm_req({}, \%opts))))->{container_groups} }
+}
+
+## Get a container group by name (`name =>`, `resource_group =>` opts).
+fn Azure::container_group_get ($name, %opts) {
+    val $r = Azure::_arm_req({ name => $name }, \%opts)
+    Azure::_decode("container_group_get", azure__container_group_get(to_json($r)))
+}
+
+## List AKS managed clusters in the subscription, or in a `resource_group =>`
+## opt. Returns a list of cluster hashrefs.
+fn Azure::aks_list (%opts) {
+    @{ Azure::_decode("aks_list",
+        azure__aks_list(to_json(Azure::_arm_req({}, \%opts))))->{clusters} }
+}
+
+## Get an AKS managed cluster by name (`name =>`, `resource_group =>` opts).
+fn Azure::aks_get ($name, %opts) {
+    val $r = Azure::_arm_req({ name => $name }, \%opts)
+    Azure::_decode("aks_get", azure__aks_get(to_json($r)))
+}
+
 # ── pure helpers (no Azure) ───────────────────────────────────────────
 
 ## Parse an Azure resource ID into a hashref { subscription, resource_group,

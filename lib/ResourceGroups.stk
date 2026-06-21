@@ -1,0 +1,30 @@
+## lib/ResourceGroups.stk — `use Azure::ResourceGroups`
+##
+## Resource-group management wrappers around `Azure::resource_group*`.
+## These reach Azure Resource Manager (ARM) via REST with the shared
+## Entra credential. The subscription comes from the `subscription =>`
+## opt or AZURE_SUBSCRIPTION_ID.
+
+package Azure::ResourceGroups
+
+use Azure
+
+## List resource groups in the subscription. Array of group hashrefs.
+fn Azure::ResourceGroups::ls (%opts) {
+    Azure::resource_groups_list(%opts)
+}
+
+## Get a resource group by name. Returns the group hashref.
+fn Azure::ResourceGroups::get ($resource_group, %opts) {
+    Azure::resource_group_get(resource_group => $resource_group, %opts)
+}
+
+## Create/update a resource group in $location. Returns the group hashref.
+fn Azure::ResourceGroups::create ($resource_group, $location, %opts) {
+    Azure::resource_group_create($resource_group, $location, %opts)
+}
+
+## Delete a resource group (long-running). Returns { resource_group, deleting }.
+fn Azure::ResourceGroups::rm ($resource_group, %opts) {
+    Azure::resource_group_delete($resource_group, %opts)
+}

@@ -12,6 +12,12 @@ It holds one shared `tokio` runtime and one Entra credential
 (`DeveloperToolsCredential` — the Azure CLI / `azd` chain), reused across every
 service client. There is no per-call fork, no per-call credential rebuild.
 
+The management plane (Resource Groups, Virtual Machines, Storage account
+management, Service Bus, Monitor, Container Instances, AKS) has no GA typed Rust
+SDK crate, so those ops reach Azure Resource Manager over REST — using the *same*
+shared credential and the *same* `azure_core` HTTP client the typed data-plane
+clients use under the hood. One auth path, one runtime, one HTTP stack.
+
 Docs: <https://menketechnologies.github.io/stryke-azure/> ·
 [Engineering report](https://menketechnologies.github.io/stryke-azure/report.html)
 
@@ -26,10 +32,14 @@ mapped onto Azure's GA Rust SDK:
 | SQS | Storage Queues | `azure_storage_queue` |
 | DynamoDB | Cosmos DB (NoSQL) | `azure_data_cosmos` (preview) |
 | Secrets Manager / SSM Parameter Store | Key Vault Secrets | `azure_security_keyvault_secrets` |
+| KMS | Key Vault Keys | `azure_security_keyvault_keys` |
 | STS | Entra identity token | `azure_identity` |
-
-Lambda (Functions) and SNS (Event Grid) have no Azure Rust SDK and are
-intentionally absent rather than shimmed over raw REST.
+| EC2 | Virtual Machines | ARM REST |
+| ECS / EKS | Container Instances / AKS | ARM REST |
+| SNS / SQS (enterprise) | Service Bus | ARM + data-plane REST |
+| CloudWatch | Azure Monitor metrics | ARM REST |
+| (account mgmt) | Storage account management | ARM REST |
+| (resource mgmt) | Resource Groups | ARM REST |
 
 ## Install
 
@@ -78,10 +88,51 @@ val $u = Azure::Cosmos::get("appdb", "users", "acme", "u1")
 val $pw = Azure::Secrets::get("db-password", vault => "my-kv")
 val @vers = Azure::Secrets::versions("db-password", vault => "my-kv")
 
-# Key Vault Keys — RSA encrypt/decrypt (KMS analog).
+# Key Vault Keys — RSA encrypt/decrypt (KMS analog) + list/get.
 val $enc = Azure::Keys::encrypt("wrap-key", "secret data", vault => "my-kv")
 val $kid = $enc->{kid}                                  # has the key version
 val $clear = Azure::Keys::decrypt("wrap-key", $version, $enc->{ciphertext}, vault => "my-kv")
+val @keys = Azure::Keys::ls(vault => "my-kv")
+val $jwk = Azure::Keys::get("wrap-key", vault => "my-kv")->{jwk}
+```
+
+### Management plane (Azure Resource Manager)
+
+These take a subscription from the `subscription =>` opt or
+`AZURE_SUBSCRIPTION_ID`; scoped ops add `resource_group => "<rg>"`.
+
+```perl
+use Azure::ResourceGroups
+use Azure::Compute
+use Azure::Storage
+use Azure::ServiceBus
+use Azure::Monitor
+use Azure::Containers
+
+# Resource Groups.
+val @rgs = Azure::ResourceGroups::ls(subscription => $sub)
+Azure::ResourceGroups::create("app-rg", "eastus", subscription => $sub)
+
+# Virtual Machines — list, get, and power actions (long-running).
+val @vms = Azure::Compute::ls(subscription => $sub, resource_group => "app-rg")
+Azure::Compute::start("web1", subscription => $sub, resource_group => "app-rg")
+Azure::Compute::deallocate("web1", subscription => $sub, resource_group => "app-rg")
+
+# Storage account management (distinct from data-plane Blob/Queue).
+val @accts = Azure::Storage::ls(subscription => $sub)
+val $keys = Azure::Storage::keys("mystorage", subscription => $sub, resource_group => "app-rg")
+
+# Service Bus — queue listing (mgmt) + send/receive (data plane).
+val @queues = Azure::ServiceBus::queues("myns", subscription => $sub, resource_group => "app-rg")
+Azure::ServiceBus::send("myns", "orders", "payload")
+val $msg = Azure::ServiceBus::receive("myns", "orders")
+
+# Monitor — metrics for any resource by its ARM id.
+val $m = Azure::Monitor::metrics($vm_resource_id, metrics => "Percentage CPU")
+
+# Container Instances + AKS.
+val @groups = Azure::Containers::groups(subscription => $sub)
+val @clusters = Azure::Containers::clusters(subscription => $sub)
 ```
 
 ### Connection options
@@ -92,7 +143,9 @@ Each call takes a trailing `%opts` hash carrying the target account/vault:
 | --- | --- |
 | Blob / Queue | `account => "<storageacct>"` (or `AZURE_STORAGE_ACCOUNT`), or `endpoint => "https://..."` |
 | Cosmos | `account => "<cosmosacct>"` (or `AZURE_COSMOS_ACCOUNT`), or `endpoint`, plus `region => "East US"` |
-| Secrets | `vault => "<kvname>"` (or `AZURE_KEYVAULT_NAME`), or `vault_url => "https://<kv>.vault.azure.net/"` |
+| Secrets / Keys | `vault => "<kvname>"` (or `AZURE_KEYVAULT_NAME`), or `vault_url => "https://<kv>.vault.azure.net/"` |
+| Management plane (ARM) | `subscription => "<id>"` (or `AZURE_SUBSCRIPTION_ID`), scoped ops add `resource_group => "<rg>"`; sovereign clouds via `arm_endpoint => "..."` |
+| Service Bus (data) | `namespace => "<ns>"`, or `sb_endpoint => "https://<ns>.servicebus.windows.net"` |
 
 Authentication uses `DeveloperToolsCredential`: sign in with `az login` (or `azd
 auth login`) before running.
@@ -128,11 +181,18 @@ Azure::format_guid($guid, $format?)      # re-emit in a .NET specifier: N (no hy
 
 | Package | Surface |
 | --- | --- |
-| `Azure` | Flat API over every export (`Azure::blob_*`, `Azure::queue_*`, `Azure::cosmos_*`, `Azure::secrets_*`, `Azure::identity_token`). |
-| `Azure::Blob` | `az://container/blob` URI helpers — `ls`, `get`, `put`, `head`, `rm`, `containers`. |
-| `Azure::Queue` | `ls`, `send`, `receive`, `delete`, `clear`, `count`, and a `pump` receive→callback→delete loop. |
-| `Azure::Cosmos` | Document helpers — `databases`, `containers`, `put`, `get`, `delete`, `query`. |
-| `Azure::Secrets` | Key Vault — `get`, `set`, `ls`, `rm`, plus `param_*` aliases for parameter-store-style callers. |
+| `Azure` | Flat API over every export (`Azure::blob_*`, `Azure::queue_*`, `Azure::cosmos_*`, `Azure::secrets_*`, `Azure::keys_*`, `Azure::vm_*`, `Azure::servicebus_*`, `Azure::identity_token`, plus the pure helpers). |
+| `Azure::Blob` | `az://container/blob` URI helpers — `ls`, `get`, `put`, `head`, `rm`, `containers`, `create_container`, `delete_container`, `set_metadata`. |
+| `Azure::Queue` | `ls`, `send`, `receive`, `delete`, `clear`, `count`, `create`, `drop`, and a `pump` receive→callback→delete loop. |
+| `Azure::Cosmos` | Document helpers — `databases`, `containers`, `put`, `get`, `delete`, `query`, `replace`, `create_database`, `create_container`, `delete_database`, `delete_container`. |
+| `Azure::Secrets` | Key Vault — `get`, `set`, `ls`, `rm`, `versions`, `backup`, plus `param_*` aliases for parameter-store-style callers. |
+| `Azure::Keys` | Key Vault keys (KMS analog) — `encrypt`, `decrypt`, `ls`, `get`. |
+| `Azure::Compute` | Virtual Machines — `ls`, `get`, `start`, `stop`, `deallocate`, `restart`. |
+| `Azure::Containers` | Container Instances + AKS — `groups`, `group`, `clusters`, `cluster`. |
+| `Azure::Storage` | Storage-account management — `ls`, `get`, `keys`. |
+| `Azure::ResourceGroups` | Resource-group management — `ls`, `get`, `create`, `rm`. |
+| `Azure::ServiceBus` | Service Bus messaging — `queues`, `send`, `receive`. |
+| `Azure::Monitor` | Azure Monitor metrics (CloudWatch analog) — `metrics`. |
 
 ## Build
 

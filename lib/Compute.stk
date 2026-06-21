@@ -1,0 +1,42 @@
+## lib/Compute.stk — `use Azure::Compute`
+##
+## Virtual Machine wrappers around `Azure::vm_*` (Azure Resource Manager
+## REST). The subscription comes from the `subscription =>` opt or
+## AZURE_SUBSCRIPTION_ID; per-VM ops take a `resource_group =>` opt.
+## Power actions (start/stop/deallocate/restart) are long-running — ARM
+## accepts the request (202) and the change completes asynchronously.
+
+package Azure::Compute
+
+use Azure
+
+## List VMs in the subscription, or in a `resource_group =>` opt if given.
+## Array of VM hashrefs.
+fn Azure::Compute::ls (%opts) {
+    Azure::vm_list(%opts)
+}
+
+## Get a VM by name (`resource_group =>` opt). Returns the VM hashref.
+fn Azure::Compute::get ($vm, %opts) {
+    Azure::vm_get($vm, %opts)
+}
+
+## Start a VM. Returns { vm, action, accepted }.
+fn Azure::Compute::start ($vm, %opts) {
+    Azure::vm_start($vm, %opts)
+}
+
+## Power off a VM but keep it allocated (still billed). Returns the hashref.
+fn Azure::Compute::stop ($vm, %opts) {
+    Azure::vm_stop($vm, %opts)
+}
+
+## Deallocate a VM (release compute, no compute charge). Returns the hashref.
+fn Azure::Compute::deallocate ($vm, %opts) {
+    Azure::vm_deallocate($vm, %opts)
+}
+
+## Restart a VM. Returns { vm, action, accepted }.
+fn Azure::Compute::restart ($vm, %opts) {
+    Azure::vm_restart($vm, %opts)
+}
