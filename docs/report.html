@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
-  <meta name="description" content="stryke-azure — engineering report. Azure client for stryke over the GA Azure SDK for Rust. cdylib/FFI architecture, service mapping, scope, dependencies.">
+  <meta name="description" content="stryke-azure — engineering report. Azure client for stryke over the GA Azure SDK for Rust plus an Azure Resource Manager management plane. cdylib/FFI architecture, service mapping, surface (89 FFI exports, 13 packages), scope, dependencies.">
   <title>stryke-azure — Engineering Report</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -93,14 +93,14 @@
     <main class="tutorial-main">
 
       <h2 class="tutorial-title"><span class="step-hash">&gt;_</span>EXECUTIVE SUMMARY</h2>
-      <p class="tutorial-subtitle"><strong>stryke-azure</strong> is an opt-in connector package in the stryke ecosystem &mdash; the Azure counterpart to <a href="https://github.com/MenkeTechnologies/stryke-aws" target="_blank" rel="noopener noreferrer">stryke-aws</a>. It exposes Blob Storage, Storage Queues, Cosmos DB, Key Vault Secrets, and Entra identity as the <code>Azure</code> package, built on the official Azure SDK for Rust (GA <code>1.0.0</code>; Cosmos on the <code>0.35.0</code> preview).</p>
-      <p class="tutorial-subtitle">The SDK pulls in tokio, hyper, rustls, reqwest, and the typespec client-core plus per-service generated models &mdash; a dependency tree that ships once, on demand, as an opt-in package. stryke core is never linked against it.</p>
+      <p class="tutorial-subtitle"><strong>stryke-azure</strong> is an opt-in connector package in the stryke ecosystem &mdash; the Azure counterpart to <a href="https://github.com/MenkeTechnologies/stryke-aws" target="_blank" rel="noopener noreferrer">stryke-aws</a>. It exposes Blob Storage, Storage Queues, Cosmos DB, Key Vault Secrets and Keys, and Entra identity as the typed data plane, plus an Azure Resource Manager management plane (Virtual Machines, Storage-account management, Service Bus, Monitor, Container Instances / AKS, Resource Groups, Subscriptions) &mdash; all under the <code>Azure</code> package. The data plane is built on the official Azure SDK for Rust (GA <code>1.0.0</code>; Cosmos on the <code>0.35.0</code> preview).</p>
+      <p class="tutorial-subtitle">The SDK pulls in tokio, hyper, rustls, reqwest, and the typespec client-core plus per-service generated models &mdash; a dependency tree that ships once, on demand, as an opt-in package. stryke core is never linked against it. The management plane has no GA typed Rust SDK crate, so those ops reach ARM over REST &mdash; reusing the <em>same</em> shared Entra credential and the <em>same</em> <code>azure_core</code> HTTP client the typed data-plane clients use.</p>
 
       <div class="stat-grid">
-        <div class="stat-card"><div class="stat-val">Azure</div><div class="stat-label">stryke namespace</div></div>
-        <div class="stat-card"><div class="stat-val cyan">opt-in</div><div class="stat-label">Tier</div></div>
+        <div class="stat-card"><div class="stat-val">89</div><div class="stat-label">FFI exports</div></div>
+        <div class="stat-card"><div class="stat-val cyan">13</div><div class="stat-label">Packages (Azure + 12)</div></div>
         <div class="stat-card"><div class="stat-val">cdylib</div><div class="stat-label">Load model (dlopen)</div></div>
-        <div class="stat-card"><div class="stat-val green">5</div><div class="stat-label">Service families</div></div>
+        <div class="stat-card"><div class="stat-val green">v0.18.0</div><div class="stat-label">Package version</div></div>
       </div>
 
       <hr class="section-rule">
@@ -121,17 +121,45 @@
 
       <hr class="section-rule">
       <h2 class="tutorial-title"><span class="step-hash">~</span>SERVICE MAPPING</h2>
-      <p>The surface tracks stryke-aws, remapped onto Azure's GA Rust SDK. Two AWS services have no Azure Rust SDK and are intentionally omitted rather than shimmed over raw REST.</p>
+      <p>The surface tracks stryke-aws, remapped onto Azure's GA Rust SDK for the data plane and onto Azure Resource Manager REST for the management plane. The typed crate versions below are the ones pinned in <code>Cargo.lock</code>.</p>
       <table class="arch-table">
-        <thead><tr><th>AWS</th><th>Azure</th><th>Crate</th></tr></thead>
+        <thead><tr><th>AWS</th><th>Azure</th><th>Backing crate / transport</th></tr></thead>
         <tbody>
-          <tr><td>S3</td><td>Blob Storage</td><td><code>azure_storage_blob</code> 1.0</td></tr>
-          <tr><td>SQS</td><td>Storage Queues</td><td><code>azure_storage_queue</code> 1.0</td></tr>
-          <tr><td>DynamoDB</td><td>Cosmos DB (NoSQL)</td><td><code>azure_data_cosmos</code> 0.35 (preview; Cargo.lock pins the exact build)</td></tr>
-          <tr><td>Secrets Manager / SSM</td><td>Key Vault Secrets</td><td><code>azure_security_keyvault_secrets</code> 1.0</td></tr>
-          <tr><td>STS</td><td>Entra identity token</td><td><code>azure_identity</code> 1.0</td></tr>
-          <tr><td>Lambda</td><td>Functions &mdash; <em>no Rust SDK</em></td><td>omitted</td></tr>
-          <tr><td>SNS</td><td>Event Grid &mdash; <em>no Rust SDK</em></td><td>omitted</td></tr>
+          <tr><td>S3</td><td>Blob Storage</td><td><code>azure_storage_blob</code> 1.0.0</td></tr>
+          <tr><td>SQS</td><td>Storage Queues</td><td><code>azure_storage_queue</code> 1.0.0</td></tr>
+          <tr><td>DynamoDB</td><td>Cosmos DB (NoSQL)</td><td><code>azure_data_cosmos</code> 0.35.0 (preview; Cargo.lock pins the exact build)</td></tr>
+          <tr><td>Secrets Manager / SSM</td><td>Key Vault Secrets</td><td><code>azure_security_keyvault_secrets</code> 1.0.0</td></tr>
+          <tr><td>KMS</td><td>Key Vault Keys</td><td><code>azure_security_keyvault_keys</code> 1.0.0</td></tr>
+          <tr><td>STS</td><td>Entra identity token</td><td><code>azure_identity</code> 1.0.0</td></tr>
+          <tr><td>EC2</td><td>Virtual Machines</td><td>ARM REST (via <code>azure_core</code> 1.0.0)</td></tr>
+          <tr><td>ECS / EKS</td><td>Container Instances / AKS</td><td>ARM REST</td></tr>
+          <tr><td>SNS / SQS (enterprise)</td><td>Service Bus</td><td>ARM + data-plane REST</td></tr>
+          <tr><td>CloudWatch</td><td>Azure Monitor metrics</td><td>ARM REST</td></tr>
+          <tr><td>(account mgmt)</td><td>Storage account management</td><td>ARM REST</td></tr>
+          <tr><td>(resource mgmt)</td><td>Resource Groups / Subscriptions</td><td>ARM REST</td></tr>
+        </tbody>
+      </table>
+      <p>The data-plane services come from the GA typed crates. The management plane has no GA typed Rust SDK crate; rather than shipping an untyped second SDK or a separate process, those ops issue ARM REST calls through the <code>azure_core</code> HTTP pipeline already linked for the typed clients &mdash; one auth path, one runtime, one HTTP stack.</p>
+
+      <hr class="section-rule">
+      <h2 class="tutorial-title"><span class="step-hash">~</span>SURFACE</h2>
+      <p>89 FFI exports, surfaced through the flat <code>Azure</code> namespace plus twelve typed sub-packages. The <code>Azure</code> namespace also carries the pure helpers and the <code>version</code> / <code>ping</code> convenience wrappers.</p>
+      <table class="arch-table">
+        <thead><tr><th>Package</th><th>Plane</th><th>Surface</th></tr></thead>
+        <tbody>
+          <tr><td><code>Azure::Blob</code></td><td>data</td><td><code>ls</code>, <code>get</code>, <code>put</code>, <code>head</code>, <code>rm</code>, <code>containers</code>, <code>create_container</code>, <code>delete_container</code>, <code>set_metadata</code></td></tr>
+          <tr><td><code>Azure::Queue</code></td><td>data</td><td><code>ls</code>, <code>send</code>, <code>receive</code>, <code>delete</code>, <code>clear</code>, <code>count</code>, <code>create</code>, <code>drop</code>, <code>pump</code></td></tr>
+          <tr><td><code>Azure::Cosmos</code></td><td>data</td><td><code>databases</code>, <code>containers</code>, <code>put</code>, <code>get</code>, <code>delete</code>, <code>query</code>, <code>replace</code>, <code>create_database</code>, <code>create_container</code>, <code>delete_database</code>, <code>delete_container</code></td></tr>
+          <tr><td><code>Azure::Secrets</code></td><td>data</td><td><code>get</code>, <code>set</code>, <code>ls</code>, <code>rm</code>, <code>versions</code>, <code>backup</code> + <code>param_get</code> / <code>param_put</code> / <code>param_delete</code> aliases</td></tr>
+          <tr><td><code>Azure::Keys</code></td><td>data</td><td><code>encrypt</code>, <code>decrypt</code>, <code>ls</code>, <code>get</code></td></tr>
+          <tr><td><code>Azure::Compute</code></td><td>mgmt</td><td><code>ls</code>, <code>get</code>, <code>start</code>, <code>stop</code>, <code>deallocate</code>, <code>restart</code>, <code>status</code>, <code>skus</code></td></tr>
+          <tr><td><code>Azure::Containers</code></td><td>mgmt</td><td><code>groups</code>, <code>group</code>, <code>clusters</code>, <code>cluster</code>, <code>node_pools</code></td></tr>
+          <tr><td><code>Azure::Storage</code></td><td>mgmt</td><td><code>ls</code>, <code>get</code>, <code>keys</code></td></tr>
+          <tr><td><code>Azure::ResourceGroups</code></td><td>mgmt</td><td><code>ls</code>, <code>get</code>, <code>create</code>, <code>rm</code>, <code>resources</code></td></tr>
+          <tr><td><code>Azure::ServiceBus</code></td><td>mgmt + data</td><td><code>queues</code>, <code>topics</code>, <code>namespaces</code>, <code>send</code>, <code>receive</code></td></tr>
+          <tr><td><code>Azure::Subscriptions</code></td><td>mgmt</td><td><code>ls</code>, <code>locations</code></td></tr>
+          <tr><td><code>Azure::Monitor</code></td><td>mgmt</td><td><code>metrics</code></td></tr>
+          <tr><td><code>Azure</code> helpers</td><td>pure</td><td><code>parse_resource_id</code>, <code>resource_id_parent</code>, <code>build_resource_id</code>, <code>parse_connection_string</code>, <code>build_connection_string</code>, <code>redact_connection_string</code>, <code>parse_blob_uri</code>, <code>build_blob_uri</code>, <code>storage_endpoint</code>, <code>parse_storage_endpoint</code>, and the <code>valid_*</code> / <code>normalize_guid</code> / <code>format_guid</code> validators</td></tr>
         </tbody>
       </table>
 
