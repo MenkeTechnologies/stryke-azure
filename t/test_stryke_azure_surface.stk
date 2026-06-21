@@ -26,6 +26,7 @@ use Azure::Storage
 use Azure::ServiceBus
 use Azure::Monitor
 use Azure::Containers
+use Azure::Subscriptions
 
 # ── Azure.stk: version + identity ───────────────────────────
 assert_ok exists &Azure::version, "Azure::version exists"
@@ -179,6 +180,10 @@ assert_ok exists &Azure::Compute::start, "Azure::Compute::start exists"
 assert_ok exists &Azure::Compute::stop, "Azure::Compute::stop exists"
 assert_ok exists &Azure::Compute::deallocate, "Azure::Compute::deallocate exists"
 assert_ok exists &Azure::Compute::restart, "Azure::Compute::restart exists"
+assert_ok exists &Azure::vm_instance_view, "Azure::vm_instance_view exists"
+assert_ok exists &Azure::compute_skus, "Azure::compute_skus exists"
+assert_ok exists &Azure::Compute::status, "Azure::Compute::status exists"
+assert_ok exists &Azure::Compute::skus, "Azure::Compute::skus exists"
 
 # ── Storage Accounts (management) ──
 assert_ok exists &Azure::storage_accounts_list, "Azure::storage_accounts_list exists"
@@ -195,6 +200,10 @@ assert_ok exists &Azure::servicebus_receive_message, "Azure::servicebus_receive_
 assert_ok exists &Azure::ServiceBus::queues, "Azure::ServiceBus::queues exists"
 assert_ok exists &Azure::ServiceBus::send, "Azure::ServiceBus::send exists"
 assert_ok exists &Azure::ServiceBus::receive, "Azure::ServiceBus::receive exists"
+assert_ok exists &Azure::servicebus_list_topics, "Azure::servicebus_list_topics exists"
+assert_ok exists &Azure::servicebus_list_namespaces, "Azure::servicebus_list_namespaces exists"
+assert_ok exists &Azure::ServiceBus::topics, "Azure::ServiceBus::topics exists"
+assert_ok exists &Azure::ServiceBus::namespaces, "Azure::ServiceBus::namespaces exists"
 
 # ── Monitor ──
 assert_ok exists &Azure::monitor_list_metrics, "Azure::monitor_list_metrics exists"
@@ -209,5 +218,15 @@ assert_ok exists &Azure::Containers::groups, "Azure::Containers::groups exists"
 assert_ok exists &Azure::Containers::group, "Azure::Containers::group exists"
 assert_ok exists &Azure::Containers::clusters, "Azure::Containers::clusters exists"
 assert_ok exists &Azure::Containers::cluster, "Azure::Containers::cluster exists"
+assert_ok exists &Azure::aks_list_node_pools, "Azure::aks_list_node_pools exists"
+assert_ok exists &Azure::Containers::node_pools, "Azure::Containers::node_pools exists"
+
+# ── Subscriptions + locations + generic resources ──
+assert_ok exists &Azure::subscriptions_list, "Azure::subscriptions_list exists"
+assert_ok exists &Azure::locations_list, "Azure::locations_list exists"
+assert_ok exists &Azure::resources_list, "Azure::resources_list exists"
+assert_ok exists &Azure::Subscriptions::ls, "Azure::Subscriptions::ls exists"
+assert_ok exists &Azure::Subscriptions::locations, "Azure::Subscriptions::locations exists"
+assert_ok exists &Azure::ResourceGroups::resources, "Azure::ResourceGroups::resources exists"
 
 test_run

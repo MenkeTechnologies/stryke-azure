@@ -108,31 +108,43 @@ use Azure::Storage
 use Azure::ServiceBus
 use Azure::Monitor
 use Azure::Containers
+use Azure::Subscriptions
 
-# Resource Groups.
+# Subscriptions + regions — tenant-scoped discovery (no subscription opt for ls).
+val @subs = Azure::Subscriptions::ls()
+val @regions = Azure::Subscriptions::locations(subscription => $sub)
+
+# Resource Groups + provider-agnostic inventory.
 val @rgs = Azure::ResourceGroups::ls(subscription => $sub)
 Azure::ResourceGroups::create("app-rg", "eastus", subscription => $sub)
+val @stores = Azure::ResourceGroups::resources(subscription => $sub,
+    filter => "resourceType eq 'Microsoft.Storage/storageAccounts'")
 
-# Virtual Machines — list, get, and power actions (long-running).
+# Virtual Machines — list, get, power actions (long-running), live state + SKUs.
 val @vms = Azure::Compute::ls(subscription => $sub, resource_group => "app-rg")
 Azure::Compute::start("web1", subscription => $sub, resource_group => "app-rg")
-Azure::Compute::deallocate("web1", subscription => $sub, resource_group => "app-rg")
+val $st = Azure::Compute::status("web1", subscription => $sub, resource_group => "app-rg")
+p "power: $st->{power_state}"                          # running / stopped / deallocated
+val @sizes = Azure::Compute::skus(subscription => $sub, location => "eastus")
 
 # Storage account management (distinct from data-plane Blob/Queue).
 val @accts = Azure::Storage::ls(subscription => $sub)
 val $keys = Azure::Storage::keys("mystorage", subscription => $sub, resource_group => "app-rg")
 
-# Service Bus — queue listing (mgmt) + send/receive (data plane).
+# Service Bus — queues/topics/namespaces listing (mgmt) + send/receive (data plane).
 val @queues = Azure::ServiceBus::queues("myns", subscription => $sub, resource_group => "app-rg")
+val @topics = Azure::ServiceBus::topics("myns", subscription => $sub, resource_group => "app-rg")
+val @namespaces = Azure::ServiceBus::namespaces(subscription => $sub)
 Azure::ServiceBus::send("myns", "orders", "payload")
 val $msg = Azure::ServiceBus::receive("myns", "orders")
 
 # Monitor — metrics for any resource by its ARM id.
 val $m = Azure::Monitor::metrics($vm_resource_id, metrics => "Percentage CPU")
 
-# Container Instances + AKS.
+# Container Instances + AKS (incl. live node pools).
 val @groups = Azure::Containers::groups(subscription => $sub)
 val @clusters = Azure::Containers::clusters(subscription => $sub)
+val @pools = Azure::Containers::node_pools("mycluster", subscription => $sub, resource_group => "app-rg")
 ```
 
 ### Connection options
@@ -187,11 +199,12 @@ Azure::format_guid($guid, $format?)      # re-emit in a .NET specifier: N (no hy
 | `Azure::Cosmos` | Document helpers — `databases`, `containers`, `put`, `get`, `delete`, `query`, `replace`, `create_database`, `create_container`, `delete_database`, `delete_container`. |
 | `Azure::Secrets` | Key Vault — `get`, `set`, `ls`, `rm`, `versions`, `backup`, plus `param_*` aliases for parameter-store-style callers. |
 | `Azure::Keys` | Key Vault keys (KMS analog) — `encrypt`, `decrypt`, `ls`, `get`. |
-| `Azure::Compute` | Virtual Machines — `ls`, `get`, `start`, `stop`, `deallocate`, `restart`. |
-| `Azure::Containers` | Container Instances + AKS — `groups`, `group`, `clusters`, `cluster`. |
+| `Azure::Compute` | Virtual Machines — `ls`, `get`, `start`, `stop`, `deallocate`, `restart`, `status` (live power state), `skus` (VM sizes). |
+| `Azure::Containers` | Container Instances + AKS — `groups`, `group`, `clusters`, `cluster`, `node_pools`. |
 | `Azure::Storage` | Storage-account management — `ls`, `get`, `keys`. |
-| `Azure::ResourceGroups` | Resource-group management — `ls`, `get`, `create`, `rm`. |
-| `Azure::ServiceBus` | Service Bus messaging — `queues`, `send`, `receive`. |
+| `Azure::ResourceGroups` | Resource-group management — `ls`, `get`, `create`, `rm`, `resources` (provider-agnostic inventory, ARM `$filter`). |
+| `Azure::ServiceBus` | Service Bus messaging — `queues`, `topics`, `namespaces`, `send`, `receive`. |
+| `Azure::Subscriptions` | Tenant/subscription discovery — `ls` (all subscriptions), `locations` (regions). |
 | `Azure::Monitor` | Azure Monitor metrics (CloudWatch analog) — `metrics`. |
 
 ## Build

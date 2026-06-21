@@ -16,6 +16,18 @@ fn Azure::ServiceBus::queues ($namespace, %opts) {
     Azure::servicebus_list_queues($namespace, %opts)
 }
 
+## List topics (pub/sub) in a Service Bus $namespace (`resource_group =>` opt).
+## Array of topic hashrefs.
+fn Azure::ServiceBus::topics ($namespace, %opts) {
+    Azure::servicebus_list_topics($namespace, %opts)
+}
+
+## List Service Bus namespaces in the subscription, or in a `resource_group =>`
+## opt. Array of namespace hashrefs.
+fn Azure::ServiceBus::namespaces (%opts) {
+    Azure::servicebus_list_namespaces(%opts)
+}
+
 ## Send $body to $queue in $namespace. Returns 1 on success.
 fn Azure::ServiceBus::send ($namespace, $queue, $body, %opts) {
     Azure::servicebus_send_message($namespace, $queue, $body, %opts)

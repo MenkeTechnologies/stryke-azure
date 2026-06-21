@@ -40,3 +40,15 @@ fn Azure::Compute::deallocate ($vm, %opts) {
 fn Azure::Compute::restart ($vm, %opts) {
     Azure::vm_restart($vm, %opts)
 }
+
+## A VM's live runtime state (`resource_group =>` opt). Returns
+## { vm, power_state, instance_view } — power_state is running/stopped/deallocated.
+fn Azure::Compute::status ($vm, %opts) {
+    Azure::vm_instance_view($vm, %opts)
+}
+
+## List Compute SKUs (VM sizes) for the subscription; a `location =>` opt narrows
+## to one region. Array of SKU hashrefs.
+fn Azure::Compute::skus (%opts) {
+    Azure::compute_skus(%opts)
+}

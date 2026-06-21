@@ -1,0 +1,24 @@
+## lib/Subscriptions.stk — `use Azure::Subscriptions`
+##
+## Tenant- and subscription-scoped discovery wrappers around
+## `Azure::subscriptions_list` and `Azure::locations_list` (Azure Resource
+## Manager REST). `ls` is tenant-scoped — it needs no subscription opt; it is the
+## entry point a management script calls before scoping any deeper request.
+## `locations` takes a subscription from the `subscription =>` opt or
+## AZURE_SUBSCRIPTION_ID.
+
+package Azure::Subscriptions
+
+use Azure
+
+## List every subscription the signed-in credential can see (tenant scope).
+## Array of subscription hashrefs ({ subscriptionId, displayName, state, … }).
+fn Azure::Subscriptions::ls (%opts) {
+    Azure::subscriptions_list(%opts)
+}
+
+## List the Azure regions available to the subscription. Array of location
+## hashrefs ({ name, displayName, … }) — the values a `location =>` opt expects.
+fn Azure::Subscriptions::locations (%opts) {
+    Azure::locations_list(%opts)
+}

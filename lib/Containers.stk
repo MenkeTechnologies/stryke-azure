@@ -30,3 +30,9 @@ fn Azure::Containers::clusters (%opts) {
 fn Azure::Containers::cluster ($name, %opts) {
     Azure::aks_get($name, %opts)
 }
+
+## List an AKS cluster's agent (node) pools (`resource_group =>` opt). Array of
+## node-pool hashrefs (count, vmSize, mode, …).
+fn Azure::Containers::node_pools ($cluster, %opts) {
+    Azure::aks_list_node_pools($cluster, %opts)
+}

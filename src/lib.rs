@@ -944,6 +944,51 @@ async fn op_vm_restart(opts: Value) -> Result<Value> {
     vm_action(&opts, "restart").await
 }
 
+/// The runtime state of a VM — its instanceView. Unlike `vm_get` (which returns
+/// the static model) this carries the live `statuses` array, including the
+/// `PowerState/*` code (running / stopped / deallocated). A convenience
+/// `power_state` field surfaces that code so callers need not scan `statuses`.
+async fn op_vm_instance_view(opts: Value) -> Result<Value> {
+    use azure_core::http::Method;
+    let vm = req_str(&opts, "vm")?.to_string();
+    let path = format!(
+        "{}?api-version=2024-07-01",
+        vm_path(&opts, "/instanceView")?
+    );
+    let view = arm_request(&opts, Method::Get, &path, None).await?;
+    let power_state = power_state_from_instance_view(&view);
+    Ok(json!({ "vm": vm, "power_state": power_state, "instance_view": view }))
+}
+
+/// Extract the `PowerState/*` suffix (running / stopped / deallocated) from a VM
+/// instanceView's `statuses` array. ARM reports power as a status code like
+/// `PowerState/running`; returns `None` if no such status is present.
+fn power_state_from_instance_view(view: &Value) -> Option<String> {
+    view.get("statuses")
+        .and_then(Value::as_array)
+        .and_then(|ss| {
+            ss.iter()
+                .filter_map(|s| s.get("code").and_then(Value::as_str))
+                .find_map(|c| c.strip_prefix("PowerState/"))
+        })
+        .map(String::from)
+}
+
+/// List the Microsoft.Compute SKUs (VM sizes, disks, etc.) available to the
+/// subscription. A `location` opt narrows the list to one region via the ARM
+/// `$filter` (the non-deprecated successor to the per-location `vmSizes` call).
+async fn op_compute_skus(opts: Value) -> Result<Value> {
+    let sub = subscription_id(&opts)?;
+    let mut path =
+        format!("/subscriptions/{sub}/providers/Microsoft.Compute/skus?api-version=2021-07-01");
+    if let Some(loc) = opt_str(&opts, "location") {
+        path.push_str("&$filter=");
+        path.push_str(&urlencode(&format!("location eq '{loc}'")));
+    }
+    let skus = arm_list(&opts, &path).await?;
+    Ok(json!({ "skus": skus }))
+}
+
 // ── Storage Accounts (ARM management plane) ──────────────────────────────────
 
 async fn op_storage_accounts_list(opts: Value) -> Result<Value> {
@@ -993,6 +1038,37 @@ async fn op_servicebus_list_queues(opts: Value) -> Result<Value> {
     );
     let queues = arm_list(&opts, &path).await?;
     Ok(json!({ "queues": queues }))
+}
+
+/// List the topics in a Service Bus namespace (the pub/sub counterpart to
+/// queues, mirroring `servicebus_list_queues`). Management-plane: `namespace`,
+/// `resource_group`, `subscription`.
+async fn op_servicebus_list_topics(opts: Value) -> Result<Value> {
+    let sub = subscription_id(&opts)?;
+    let rg = resource_group(&opts)?;
+    let namespace = req_str(&opts, "namespace")?;
+    let path = format!(
+        "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ServiceBus/namespaces/{namespace}/topics?api-version=2021-11-01"
+    );
+    let topics = arm_list(&opts, &path).await?;
+    Ok(json!({ "topics": topics }))
+}
+
+/// List the Service Bus namespaces in a subscription, or in a `resource_group`
+/// opt if given. The namespace is the parent the queue/topic ops scope under, so
+/// this is the discovery call that precedes them.
+async fn op_servicebus_list_namespaces(opts: Value) -> Result<Value> {
+    let sub = subscription_id(&opts)?;
+    let path = match opt_str(&opts, "resource_group") {
+        Some(rg) => format!(
+            "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ServiceBus/namespaces?api-version=2021-11-01"
+        ),
+        None => format!(
+            "/subscriptions/{sub}/providers/Microsoft.ServiceBus/namespaces?api-version=2021-11-01"
+        ),
+    };
+    let namespaces = arm_list(&opts, &path).await?;
+    Ok(json!({ "namespaces": namespaces }))
 }
 
 /// The Service Bus data-plane base for a namespace. Sovereign clouds differ;
@@ -1141,6 +1217,78 @@ async fn op_aks_get(opts: Value) -> Result<Value> {
         "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ContainerService/managedClusters/{name}?api-version=2024-05-01"
     );
     arm_request(&opts, Method::Get, &path, None).await
+}
+
+/// List the agent (node) pools of an AKS managed cluster. The cluster-create
+/// payload carries an inline `agentPoolProfiles`, but a running cluster's pools
+/// are scaled/upgraded independently — this is the live, per-pool view (count,
+/// vmSize, mode, provisioningState) the cluster `get` does not surface.
+async fn op_aks_list_node_pools(opts: Value) -> Result<Value> {
+    let sub = subscription_id(&opts)?;
+    let rg = resource_group(&opts)?;
+    let cluster = req_str(&opts, "cluster")?;
+    let path = format!(
+        "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ContainerService/managedClusters/{cluster}/agentPools?api-version=2024-05-01"
+    );
+    let pools = arm_list(&opts, &path).await?;
+    Ok(json!({ "cluster": cluster, "node_pools": pools }))
+}
+
+// ── Subscriptions + locations + generic resources (ARM) ──────────────────────
+
+/// List every subscription the signed-in credential can see (tenant scope —
+/// no `subscription` opt needed). The starting point for any management script
+/// that must enumerate accounts before scoping a deeper call.
+async fn op_subscriptions_list(opts: Value) -> Result<Value> {
+    let subs = arm_list(&opts, "/subscriptions?api-version=2022-12-01").await?;
+    Ok(json!({ "subscriptions": subs }))
+}
+
+/// List the Azure regions available to a subscription. Each entry carries the
+/// canonical `name` (e.g. `eastus`) and a `displayName` (e.g. `East US`) — the
+/// values a `location` opt expects elsewhere (resource-group create, VM SKUs).
+async fn op_locations_list(opts: Value) -> Result<Value> {
+    let sub = subscription_id(&opts)?;
+    let path = format!("/subscriptions/{sub}/locations?api-version=2022-12-01");
+    let locations = arm_list(&opts, &path).await?;
+    Ok(json!({ "locations": locations }))
+}
+
+/// List every resource in a subscription, optionally scoped by a `resource_group`
+/// opt and filtered with an ARM `$filter` opt (e.g.
+/// `resourceType eq 'Microsoft.Storage/storageAccounts'`). This is the
+/// provider-agnostic inventory call — it returns resources the typed per-service
+/// list ops do not cover.
+async fn op_resources_list(opts: Value) -> Result<Value> {
+    let sub = subscription_id(&opts)?;
+    let mut path = match opt_str(&opts, "resource_group") {
+        Some(rg) => {
+            format!("/subscriptions/{sub}/resourceGroups/{rg}/resources?api-version=2021-04-01")
+        }
+        None => format!("/subscriptions/{sub}/resources?api-version=2021-04-01"),
+    };
+    if let Some(f) = opt_str(&opts, "filter") {
+        // ARM expects the `$filter` value URL-encoded (it carries spaces/quotes).
+        path.push_str("&$filter=");
+        path.push_str(&urlencode(f));
+    }
+    let resources = arm_list(&opts, &path).await?;
+    Ok(json!({ "resources": resources }))
+}
+
+/// Percent-encode an ARM `$filter` value. ARM filters carry spaces, quotes, and
+/// `'` literals; encode every byte that is not an RFC-3986 unreserved character.
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 // ── FFI plumbing ─────────────────────────────────────────────────────────────
@@ -2014,6 +2162,8 @@ export!(azure__vm_start, op_vm_start);
 export!(azure__vm_stop, op_vm_stop);
 export!(azure__vm_deallocate, op_vm_deallocate);
 export!(azure__vm_restart, op_vm_restart);
+export!(azure__vm_instance_view, op_vm_instance_view);
+export!(azure__compute_skus, op_compute_skus);
 
 export!(azure__storage_accounts_list, op_storage_accounts_list);
 export!(azure__storage_account_get, op_storage_account_get);
@@ -2023,6 +2173,11 @@ export!(
 );
 
 export!(azure__servicebus_list_queues, op_servicebus_list_queues);
+export!(azure__servicebus_list_topics, op_servicebus_list_topics);
+export!(
+    azure__servicebus_list_namespaces,
+    op_servicebus_list_namespaces
+);
 export!(azure__servicebus_send_message, op_servicebus_send_message);
 export!(
     azure__servicebus_receive_message,
@@ -2035,6 +2190,11 @@ export!(azure__container_groups_list, op_container_groups_list);
 export!(azure__container_group_get, op_container_group_get);
 export!(azure__aks_list, op_aks_list);
 export!(azure__aks_get, op_aks_get);
+export!(azure__aks_list_node_pools, op_aks_list_node_pools);
+
+export!(azure__subscriptions_list, op_subscriptions_list);
+export!(azure__locations_list, op_locations_list);
+export!(azure__resources_list, op_resources_list);
 
 #[no_mangle]
 pub extern "C" fn azure__parse_resource_id(args: *const c_char) -> *const c_char {
@@ -2250,6 +2410,52 @@ mod endpoint_tests {
         );
         assert!(servicebus_base(&json!({})).is_err());
     }
+
+    #[test]
+    fn urlencode_escapes_arm_filter_specials() {
+        // Unreserved characters pass through untouched.
+        assert_eq!(urlencode("eastus-2_v.1~x"), "eastus-2_v.1~x");
+        // Spaces, quotes, and `'` literals (common in ARM $filter) are encoded.
+        assert_eq!(
+            urlencode("location eq 'eastus'"),
+            "location%20eq%20%27eastus%27"
+        );
+        // `/` (resourceType filters) and `.` boundary cases.
+        assert_eq!(
+            urlencode("resourceType eq 'Microsoft.Storage/storageAccounts'"),
+            "resourceType%20eq%20%27Microsoft.Storage%2FstorageAccounts%27"
+        );
+    }
+
+    #[test]
+    fn power_state_from_instance_view_reads_powerstate_code() {
+        // A running VM: PowerState/running among the statuses.
+        let view = json!({
+            "statuses": [
+                { "code": "ProvisioningState/succeeded", "level": "Info" },
+                { "code": "PowerState/running", "level": "Info" }
+            ]
+        });
+        assert_eq!(
+            power_state_from_instance_view(&view),
+            Some("running".to_string())
+        );
+        // A deallocated VM.
+        let view = json!({ "statuses": [{ "code": "PowerState/deallocated" }] });
+        assert_eq!(
+            power_state_from_instance_view(&view),
+            Some("deallocated".to_string())
+        );
+        // No PowerState status → None (not a panic, not an empty string).
+        let view = json!({ "statuses": [{ "code": "ProvisioningState/updating" }] });
+        assert_eq!(power_state_from_instance_view(&view), None);
+        // Missing/empty statuses → None.
+        assert_eq!(power_state_from_instance_view(&json!({})), None);
+        assert_eq!(
+            power_state_from_instance_view(&json!({ "statuses": [] })),
+            None
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2326,6 +2532,52 @@ mod ffi_tests {
         assert_eq!(v["region"], json!("eu-wést-1"));
         assert_eq!(v["nested"]["n"], json!(42));
         assert!(v.get("error").is_none());
+    }
+
+    /// The new management-plane exports must surface a clean missing-arg error
+    /// across the C ABI — never a panic/segfault — when called without the
+    /// required subscription/scope args (the CI state: no creds, no env vars).
+    #[test]
+    fn new_arm_exports_missing_args_return_error_not_segfault() {
+        std::env::remove_var("AZURE_SUBSCRIPTION_ID");
+        let empty = std::ffi::CString::new("{}").unwrap();
+        // Each requires a subscription (directly or via an env var); with none
+        // present the handler returns an `error` string, not a crash.
+        for export in [
+            azure__locations_list as extern "C" fn(*const c_char) -> *const c_char,
+            azure__resources_list,
+            azure__compute_skus,
+            azure__servicebus_list_namespaces,
+        ] {
+            let raw = export(empty.as_ptr());
+            let s = unsafe { drain(raw) };
+            let v: Value = serde_json::from_str(&s).expect("valid JSON");
+            assert!(
+                v.get("error").and_then(Value::as_str).is_some(),
+                "expected an error string, got {v}"
+            );
+        }
+    }
+
+    /// Scoped exports that need `vm`/`cluster`/`namespace`/`resource_group` beyond
+    /// the subscription must also error cleanly when those are absent — even when
+    /// a subscription is supplied.
+    #[test]
+    fn new_scoped_exports_missing_args_return_error_not_segfault() {
+        let with_sub = std::ffi::CString::new(r#"{"subscription":"s"}"#).unwrap();
+        for export in [
+            azure__vm_instance_view as extern "C" fn(*const c_char) -> *const c_char,
+            azure__aks_list_node_pools,
+            azure__servicebus_list_topics,
+        ] {
+            let raw = export(with_sub.as_ptr());
+            let s = unsafe { drain(raw) };
+            let v: Value = serde_json::from_str(&s).expect("valid JSON");
+            assert!(
+                v.get("error").and_then(Value::as_str).is_some(),
+                "expected a missing-arg error, got {v}"
+            );
+        }
     }
 
     // ── pure helpers (no Azure) ──────────────────────────────────────────────

@@ -28,3 +28,11 @@ fn Azure::ResourceGroups::create ($resource_group, $location, %opts) {
 fn Azure::ResourceGroups::rm ($resource_group, %opts) {
     Azure::resource_group_delete($resource_group, %opts)
 }
+
+## List resources in the subscription, or in a `resource_group =>` opt, with an
+## optional ARM `filter =>` opt (e.g.
+## "resourceType eq 'Microsoft.Storage/storageAccounts'"). Array of resource
+## hashrefs — the provider-agnostic inventory call.
+fn Azure::ResourceGroups::resources (%opts) {
+    Azure::resources_list(%opts)
+}

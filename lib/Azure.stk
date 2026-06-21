@@ -412,6 +412,20 @@ fn Azure::vm_restart ($vm, %opts) {
     Azure::_decode("vm_restart", azure__vm_restart(to_json(Azure::_arm_req({ vm => $vm }, \%opts))))
 }
 
+## Get a VM's runtime instance view (`vm =>`, `resource_group =>` opts). Returns
+## { vm, power_state, instance_view } — power_state is the PowerState code
+## (running/stopped/deallocated) lifted out of the statuses array.
+fn Azure::vm_instance_view ($vm, %opts) {
+    Azure::_decode("vm_instance_view", azure__vm_instance_view(to_json(Azure::_arm_req({ vm => $vm }, \%opts))))
+}
+
+## List Microsoft.Compute SKUs (VM sizes etc.) for the subscription, optionally
+## narrowed to one region by a `location =>` opt. Returns a list of SKU hashrefs.
+fn Azure::compute_skus (%opts) {
+    @{ Azure::_decode("compute_skus",
+        azure__compute_skus(to_json(Azure::_arm_req({ location => $opts{location} }, \%opts))))->{skus} }
+}
+
 # ── Storage Accounts (management plane) ───────────────────────────────
 
 ## List storage accounts in the subscription, or in a `resource_group =>` opt.
@@ -456,6 +470,20 @@ fn Azure::servicebus_receive_message ($namespace, $queue, %opts) {
     Azure::_decode("servicebus_receive_message", azure__servicebus_receive_message(to_json($r)))->{message}
 }
 
+## List Service Bus topics in a namespace (`namespace =>`, `resource_group =>`
+## opts). Returns a list of topic hashrefs.
+fn Azure::servicebus_list_topics ($namespace, %opts) {
+    val $r = Azure::_arm_req({ namespace => $namespace }, \%opts)
+    @{ Azure::_decode("servicebus_list_topics", azure__servicebus_list_topics(to_json($r)))->{topics} }
+}
+
+## List Service Bus namespaces in the subscription, or in a `resource_group =>`
+## opt. Returns a list of namespace hashrefs.
+fn Azure::servicebus_list_namespaces (%opts) {
+    @{ Azure::_decode("servicebus_list_namespaces",
+        azure__servicebus_list_namespaces(to_json(Azure::_arm_req({}, \%opts))))->{namespaces} }
+}
+
 # ── Monitor ──────────────────────────────────────────────────────────
 
 ## List metrics for a resource. opts: resource_id (full ARM id, required),
@@ -492,6 +520,38 @@ fn Azure::aks_list (%opts) {
 fn Azure::aks_get ($name, %opts) {
     val $r = Azure::_arm_req({ name => $name }, \%opts)
     Azure::_decode("aks_get", azure__aks_get(to_json($r)))
+}
+
+## List an AKS cluster's agent (node) pools (`cluster =>`, `resource_group =>`
+## opts). Returns a list of node-pool hashrefs (count, vmSize, mode, …).
+fn Azure::aks_list_node_pools ($cluster, %opts) {
+    val $r = Azure::_arm_req({ cluster => $cluster }, \%opts)
+    @{ Azure::_decode("aks_list_node_pools", azure__aks_list_node_pools(to_json($r)))->{node_pools} }
+}
+
+# ── Subscriptions + locations + generic resources ────────────────────
+
+## List every subscription the credential can see (tenant scope — no
+## subscription opt). Returns a list of subscription hashrefs.
+fn Azure::subscriptions_list (%opts) {
+    @{ Azure::_decode("subscriptions_list",
+        azure__subscriptions_list(to_json(Azure::_arm_req({}, \%opts))))->{subscriptions} }
+}
+
+## List the Azure regions available to the subscription. Returns a list of
+## location hashrefs ({ name, displayName, … }).
+fn Azure::locations_list (%opts) {
+    @{ Azure::_decode("locations_list",
+        azure__locations_list(to_json(Azure::_arm_req({}, \%opts))))->{locations} }
+}
+
+## List resources in the subscription, optionally scoped by `resource_group =>`
+## and filtered by an ARM `filter =>` opt (e.g.
+## "resourceType eq 'Microsoft.Storage/storageAccounts'"). Returns a list of
+## resource hashrefs.
+fn Azure::resources_list (%opts) {
+    @{ Azure::_decode("resources_list",
+        azure__resources_list(to_json(Azure::_arm_req({ filter => $opts{filter} }, \%opts))))->{resources} }
 }
 
 # ── pure helpers (no Azure) ───────────────────────────────────────────
