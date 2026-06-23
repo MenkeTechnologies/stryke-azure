@@ -1,7 +1,20 @@
-# stryke-azure
+```
+ ███████╗████████╗██████╗ ██╗   ██╗██╗  ██╗███████╗
+ ██╔════╝╚══██╔══╝██╔══██╗╚██╗ ██╔╝██║ ██╔╝██╔════╝
+ ███████╗   ██║   ██████╔╝ ╚████╔╝ █████╔╝ █████╗
+ ╚════██║   ██║   ██╔══██╗  ╚██╔╝  ██╔═██╗ ██╔══╝
+ ███████║   ██║   ██║  ██║   ██║   ██║  ██╗███████╗
+ ╚══════╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚══════╝
+                 [ a z u r e ]
+```
 
 [![CI](https://github.com/MenkeTechnologies/stryke-azure/actions/workflows/ci.yml/badge.svg)](https://github.com/MenkeTechnologies/stryke-azure/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![stryke](https://img.shields.io/badge/stryke-package-cyan.svg)](https://github.com/MenkeTechnologies/strykelang)
+
+### `[AZURE CLOUD CLIENT FOR STRYKE // BLOB STORAGE + ENTRA AUTH + ARM MANAGEMENT PLANE]`
+
+> *"The cloud, one stryke pipe away."*
 
 Azure client for [stryke](https://github.com/MenkeTechnologies/strykelang) — a
 `cdylib` dlopened in-process by the stryke runtime and exposed as the `Azure`
