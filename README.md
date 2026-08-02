@@ -206,7 +206,7 @@ Azure::format_guid($guid, $format?)      # re-emit in a .NET specifier: N (no hy
 
 | Package | Surface |
 | --- | --- |
-| `Azure` | Flat API over every export (`Azure::blob_*`, `Azure::queue_*`, `Azure::cosmos_*`, `Azure::secrets_*`, `Azure::keys_*`, `Azure::vm_*`, `Azure::servicebus_*`, `Azure::identity_token`, plus the pure helpers). |
+| `Azure` | Flat API over every export (`Azure::blob_*`, `Azure::queue_*`, `Azure::cosmos_*`, `Azure::secrets_*`, `Azure::keys_*`, `Azure::vm_*`, `Azure::servicebus_*`, `Azure::identity_token`), plus all pure helpers, `Azure::version`, and `Azure::ping`. |
 | `Azure::Blob` | `az://container/blob` URI helpers — `ls`, `get`, `put`, `head`, `rm`, `containers`, `create_container`, `delete_container`, `set_metadata`. |
 | `Azure::Queue` | `ls`, `send`, `receive`, `delete`, `clear`, `count`, `create`, `drop`, and a `pump` receive→callback→delete loop. |
 | `Azure::Cosmos` | Document helpers — `databases`, `containers`, `put`, `get`, `delete`, `query`, `replace`, `create_database`, `create_container`, `delete_database`, `delete_container`. |
